@@ -147,6 +147,10 @@ namespace TbhDpsMeter
                             if (!byUid.TryGetValue(uid, out var item)) continue;
                             int itemKey = (int)Json.Num(Json.Get(item, "ItemKey"));
                             var g = new GearItem { Slot = "slot" + slot, Name = "item" + itemKey, ItemKey = itemKey, Uid = (ulong)uid };
+                            // applied socket counts (裝飾/雕刻/銘文) — plain ints in the save instance
+                            g.DecoCount = (int)Json.Num(Json.Get(item, "DecorationAppliedTotalCount"));
+                            g.EngraveCount = (int)Json.Num(Json.Get(item, "EngravingAppliedTotalCount"));
+                            g.InscribeCount = (int)Json.Num(Json.Get(item, "InscriptionAppliedTotalCount"));
                             var ench = Json.Arr(Json.Get(item, "EnchantData"));
                             if (ench != null)
                                 foreach (var m in ench)

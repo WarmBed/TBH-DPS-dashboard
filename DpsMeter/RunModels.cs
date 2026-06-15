@@ -39,8 +39,10 @@ namespace TbhDpsMeter
         /// <summary>Required/item level (the "需要等級" number). 0 = unknown -> contributes no level points.</summary>
         public int Level;
         public readonly List<Affix> Affixes = new List<Affix>();
-        /// <summary>Contents of the 裝飾/雕刻/銘文 sockets, each as a stat+value (empty sockets omitted).</summary>
+        /// <summary>Contents of the 裝飾/雕刻/銘文 sockets, each as a stat+value (live path; usually empty).</summary>
         public readonly List<Affix> Sockets = new List<Affix>();
+        /// <summary>Applied socket counts from the save (裝飾 / 雕刻 / 銘文). Scored per applied socket.</summary>
+        public int DecoCount, EngraveCount, InscribeCount;
         /// <summary>Item icon (a UnityEngine.Texture at runtime; typed object so the Unity-free
         /// TrackerTests build can compile RunModels). null when unavailable -> panel shows a glyph.</summary>
         [System.NonSerialized] public object Icon;

@@ -223,6 +223,11 @@ class Tests
         Check("gearscore character = 860", Near(GearScore.ScoreCharacter(gsSnap), 860), GearScore.ScoreCharacter(gsSnap));
         Check("gearscore null item = 0", Near(GearScore.ScoreItem(null).Total, 0), GearScore.ScoreItem(null).Total);
 
+        // socket counts (裝飾/雕刻/銘文) score at 40 pts each
+        var giSock = new GearItem { Grade = "RARE", DecoCount = 2, EngraveCount = 1, InscribeCount = 0 };
+        // 120 (rare) + (2+1+0)*40 = 240
+        Check("gearscore sockets = 240", Near(GearScore.ScoreItem(giSock).Total, 240), GearScore.ScoreItem(giSock).Total);
+
         Console.WriteLine(_fail == 0 ? "\nALL TESTS PASSED" : $"\n{_fail} TEST(S) FAILED");
         return _fail == 0 ? 0 : 1;
     }

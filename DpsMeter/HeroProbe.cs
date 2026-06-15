@@ -981,14 +981,6 @@ namespace TbhDpsMeter
                         if (string.IsNullOrEmpty(g.Name) || g.Name == nameKey)
                             g.Name = string.IsNullOrEmpty(nameKey) ? "item" + Refl.ToI(Refl.Get(info, "ItemKey")) : nameKey;
 
-                        // GearScore inputs (all best-effort: 0/"" /null on failure so scoring degrades).
-                        // grade resolved BY TYPE (EGradeType) like the tooltip's _itemGradeProp — obfuscation-proof.
-                        if (dbg && !_gearDiagged) { _gearDiagged = true; DiagGearScore(item, info); }
-                        g.Grade = ReadGrade(item);
-                        g.Level = ReadItemLevel(item, info);
-                        g.Icon = ReadItemIcon(item, info);
-                        ReadSockets(item, g);
-
                         foreach (var slot in GearModSlots)
                         {
                             var mod = Refl.Get(item, slot);          // GearModData (struct)
@@ -1007,6 +999,26 @@ namespace TbhDpsMeter
                 }
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("ReadGear: " + e.Message); }
+        }
+
+        /// <summary>Best-effort: fetch the live item by its save uid (ue.ti.opd) and fill the template-only
+        /// fields GearScore needs — grade / item level / icon — that the save instance doesn't carry.
+        /// Leaves fields empty on failure (the score then uses affixes + socket counts only).</summary>
+        public static void EnrichGearFromLive(GearItem g)
+        {
+            if (g == null || g.Uid == 0) return;
+            try
+            {
+                object item = Refl.CallStatic("ue+ti", "opd", g.Uid) ?? Refl.CallStatic("ue+ti", "ish", g.Uid);
+                if (item == null) return;
+                var info = Refl.Get(item, "brke");
+                bool dbg = Plugin.DebugSnapshot != null && Plugin.DebugSnapshot.Value;
+                if (dbg && !_gearDiagged) { _gearDiagged = true; DiagGearScore(item, info); }
+                if (string.IsNullOrEmpty(g.Grade)) g.Grade = ReadGrade(item);
+                if (g.Level == 0) g.Level = ReadItemLevel(item, info);
+                if (g.Icon == null) g.Icon = ReadItemIcon(item, info);
+            }
+            catch { }
         }
 
         // ---- GearScore field readers (grade / item level / sockets / icon) ----
@@ -1051,26 +1063,6 @@ namespace TbhDpsMeter
                     if (Refl.Get(v, "texture") is UnityEngine.Texture t) return t;   // Sprite-like wrapper
                 }
             return null;
-        }
-
-        // socket contents (裝飾/雕刻/銘文 gems). Container + entry member names confirmed via DiagGearScore;
-        // each gem contributes a stat+value read like an affix (iox/ioy). Fails safe to "no sockets".
-        private static readonly string[] SocketContainers = { "DecoSlots", "CarveSlots", "InscribeSlots" };
-        private static void ReadSockets(object item, GearItem g)
-        {
-            foreach (var c in SocketContainers)
-            {
-                var col = Refl.Get(item, c) ?? Refl.Call(item, c);
-                if (col == null) continue;
-                foreach (var entry in Refl.Enumerate(col))
-                {
-                    if (entry == null) continue;
-                    string st = Refl.Str(Refl.Call(entry, "iox") ?? Refl.Get(entry, "iox"));
-                    if (string.IsNullOrEmpty(st) || st == "NONE" || st == "None") continue;
-                    double val = Refl.ToD(Refl.Call(entry, "ioy") ?? Refl.Get(entry, "ioy"));
-                    g.Sockets.Add(new Affix(st, val));
-                }
-            }
         }
 
         /// <summary>One-shot dump (DebugSnapshot-gated, first item only) to pin down item-level,

@@ -19,6 +19,8 @@ namespace TbhDpsMeter
         };
         private const double GradeDefault = 0;
         private const double LevelWeight = 2.0;
+        // points per applied socket (裝飾/雕刻/銘文) — the save records counts, not per-gem stats.
+        private const double SocketWeight = 40.0;
 
         // Per-stat normalisation so attack (~hundreds) and crit% (~0.05) contribute comparably.
         // Keys are the affix/stat names emitted by HeroProbe (lower-cased on lookup). Default = 1.
@@ -64,7 +66,10 @@ namespace TbhDpsMeter
             double lv = g.Level * LevelWeight;
             if (lv != 0) { s.Parts.Add(new Part("level", lv)); s.Total += lv; }
             foreach (var a in g.Affixes) { double p = a.Value * WeightOf(a.Name); s.Parts.Add(new Part(a.Name, p)); s.Total += p; }
+            // live per-gem socket stats (rare); usually empty — socket value comes from the counts below.
             foreach (var a in g.Sockets) { double p = a.Value * WeightOf(a.Name); s.Parts.Add(new Part("socket:" + a.Name, p)); s.Total += p; }
+            int sockets = g.DecoCount + g.EngraveCount + g.InscribeCount;
+            if (sockets != 0) { double p = sockets * SocketWeight; s.Parts.Add(new Part("sockets", p)); s.Total += p; }
             return s;
         }
 

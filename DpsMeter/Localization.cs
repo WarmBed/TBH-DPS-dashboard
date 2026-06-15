@@ -166,6 +166,7 @@ namespace TbhDpsMeter
             { "mode_detailed",  new[] { "詳細", "Detailed", "詳細", "详细", "Detalle" } },
             { "grade",          new[] { "稀有度", "Rarity", "レア度", "稀有度", "Rareza" } },
             { "level",          new[] { "等級", "Level", "レベル", "等级", "Nivel" } },
+            { "sockets",        new[] { "鑲嵌槽", "Sockets", "ソケット", "镶嵌槽", "Engastes" } },
             { "reset_all",      new[] { "清除全部", "Reset all", "全削除", "清除全部", "Borrar todo" } },
             { "confirm_reset",  new[] { "確認清除?", "Confirm?", "確認?", "确认清除?", "¿Confirmar?" } },
             { "uncategorized",  new[] { "未分類", "Other", "未分類", "未分类", "Otros" } },

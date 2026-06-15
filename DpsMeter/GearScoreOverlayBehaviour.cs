@@ -55,7 +55,7 @@ namespace TbhDpsMeter
                 InputCompat.Poll();
                 InputCompat.SetPanel(Slot, _visible && !GameUiState.MenuOpen(), ScaledRect());
                 if (InputCompat.KeyPressed(Plugin.GearScoreToggleKey)) { _visible = !_visible; if (_visible) Refresh(); }
-                if (_visible && Time.realtimeSinceStartup >= _nextRefresh) { _nextRefresh = Time.realtimeSinceStartup + 0.5f; Refresh(); }
+                if (_visible && Time.realtimeSinceStartup >= _nextRefresh) { _nextRefresh = Time.realtimeSinceStartup + 1.5f; Refresh(); }
                 if (_visible) HandlePointer(); else if (_dragging) _dragging = false;
             }
             catch { }
@@ -63,17 +63,13 @@ namespace TbhDpsMeter
 
         private void Refresh()
         {
-            _party.Clear();
+            // Gear comes from the decrypted save (same source F11 uses) via CharacterReader.CaptureParty —
+            // the in-memory ACTk uid collection can't be enumerated, so HeroProbe.ReadGear reads 0.
             try
             {
-                foreach (var h in HeroProbe.FindParty())
-                {
-                    if (h == null) continue;
-                    var snap = new CharacterSnapshot();
-                    HeroProbe.ReadIdentity(h, snap);
-                    HeroProbe.ReadGear(h, snap);
-                    _party.Add(snap);
-                }
+                var party = CharacterReader.CaptureParty();
+                _party.Clear();
+                if (party != null) _party.AddRange(party);
             }
             catch { }
         }
