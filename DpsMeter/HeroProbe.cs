@@ -1009,7 +1009,8 @@ namespace TbhDpsMeter
             if (g == null || g.Uid == 0) return;
             try
             {
-                object item = Refl.CallStatic("ue+ti", "opd", g.Uid) ?? Refl.CallStatic("ue+ti", "ish", g.Uid);
+                // fetch-by-uid is hcb/isk post-0.9.6 (opd/ish was the pre-remap name) — same as ResolveItemName.
+                object item = Refl.CallStatic("ue+ti", "hcb", g.Uid) ?? Refl.CallStatic("ue+ti", "isk", g.Uid);
                 if (item == null) return;
                 var info = Refl.Get(item, "brke");
                 bool dbg = Plugin.DebugSnapshot != null && Plugin.DebugSnapshot.Value;

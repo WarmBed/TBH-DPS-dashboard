@@ -42,6 +42,23 @@ namespace TbhDpsMeter
             return StatWeight.TryGetValue(stat.ToLowerInvariant(), out var w) ? w : StatWeightDefault;
         }
 
+        // Stat -> offence/defence bucket for the attack/defence split. Names match HeroProbe/SaveGearReader.
+        private static readonly HashSet<string> DefStats = new HashSet<string>
+        { "hp", "armor", "fireres", "coldres", "lightres", "chaosres", "dodge", "block", "hpregen" };
+        private static readonly HashSet<string> OffStats = new HashSet<string>
+        { "attack", "aspd", "critrate", "critdmg", "aoe", "cdr", "multistrike", "projcount", "hpleech",
+          "phys%", "fire%", "cold%", "light%", "chaos%", "castspd", "projdmg", "meleedmg", "aoedmg", "summondmg" };
+
+        /// <summary>+1 offensive, -1 defensive, 0 neutral (general/util) for a stat name.</summary>
+        public static int Bucket(string stat)
+        {
+            if (string.IsNullOrEmpty(stat)) return 0;
+            string s = stat.ToLowerInvariant();
+            if (OffStats.Contains(s)) return 1;
+            if (DefStats.Contains(s)) return -1;
+            return 0;
+        }
+
         public static double GradePoints(string grade)
         {
             if (string.IsNullOrEmpty(grade)) return GradeDefault;
@@ -54,6 +71,8 @@ namespace TbhDpsMeter
         public class ItemScore
         {
             public double Total;
+            public double Attack;    // offensive affix points
+            public double Defense;   // defensive affix points
             public readonly List<Part> Parts = new List<Part>();
         }
 
@@ -65,20 +84,35 @@ namespace TbhDpsMeter
             s.Parts.Add(new Part("grade", gb)); s.Total += gb;
             double lv = g.Level * LevelWeight;
             if (lv != 0) { s.Parts.Add(new Part("level", lv)); s.Total += lv; }
-            foreach (var a in g.Affixes) { double p = a.Value * WeightOf(a.Name); s.Parts.Add(new Part(a.Name, p)); s.Total += p; }
+            foreach (var a in g.Affixes) Add(s, a.Name, a.Value * WeightOf(a.Name), a.Name);
             // live per-gem socket stats (rare); usually empty — socket value comes from the counts below.
-            foreach (var a in g.Sockets) { double p = a.Value * WeightOf(a.Name); s.Parts.Add(new Part("socket:" + a.Name, p)); s.Total += p; }
+            foreach (var a in g.Sockets) Add(s, "socket:" + a.Name, a.Value * WeightOf(a.Name), a.Name);
             int sockets = g.DecoCount + g.EngraveCount + g.InscribeCount;
             if (sockets != 0) { double p = sockets * SocketWeight; s.Parts.Add(new Part("sockets", p)); s.Total += p; }
             return s;
         }
 
-        public static double ScoreCharacter(CharacterSnapshot snap)
+        // add a scored line, bucketing its points into Attack/Defense (general stays in Total only).
+        private static void Add(ItemScore s, string label, double pts, string statForBucket)
         {
-            if (snap == null) return 0;
-            double total = 0;
-            foreach (var g in snap.Equipment) total += ScoreItem(g).Total;
-            return total;
+            s.Parts.Add(new Part(label, pts)); s.Total += pts;
+            int b = Bucket(statForBucket);
+            if (b > 0) s.Attack += pts; else if (b < 0) s.Defense += pts;
+        }
+
+        /// <summary>Whole-character roll-up: total, plus offence/defence split (affix-based).</summary>
+        public struct CharScore { public double Total, Attack, Defense; }
+
+        public static CharScore ScoreCharacter(CharacterSnapshot snap)
+        {
+            var cs = new CharScore();
+            if (snap == null) return cs;
+            foreach (var g in snap.Equipment)
+            {
+                var s = ScoreItem(g);
+                cs.Total += s.Total; cs.Attack += s.Attack; cs.Defense += s.Defense;
+            }
+            return cs;
         }
     }
 }

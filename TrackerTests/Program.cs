@@ -220,7 +220,14 @@ class Tests
         var gsSnap = new CharacterSnapshot();
         gsSnap.Equipment.Add(giLegendary);
         gsSnap.Equipment.Add(new GearItem { Grade = "RARE", Level = 0 });   // 120 + 0
-        Check("gearscore character = 860", Near(GearScore.ScoreCharacter(gsSnap), 860), GearScore.ScoreCharacter(gsSnap));
+        Check("gearscore character total = 860", Near(GearScore.ScoreCharacter(gsSnap).Total, 860), GearScore.ScoreCharacter(gsSnap).Total);
+        // attack/defence split: attack=100 (offensive), hp is defensive
+        var giMix = new GearItem();
+        giMix.Affixes.Add(new Affix("attack", 100));  // offensive
+        giMix.Affixes.Add(new Affix("hp", 500));      // defensive: 500*0.1 = 50
+        var isMix = GearScore.ScoreItem(giMix);
+        Check("gearscore attack bucket = 100", Near(isMix.Attack, 100), isMix.Attack);
+        Check("gearscore defense bucket = 50", Near(isMix.Defense, 50), isMix.Defense);
         Check("gearscore null item = 0", Near(GearScore.ScoreItem(null).Total, 0), GearScore.ScoreItem(null).Total);
 
         // socket counts (裝飾/雕刻/銘文) score at 40 pts each
