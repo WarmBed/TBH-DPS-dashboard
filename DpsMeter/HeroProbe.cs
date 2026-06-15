@@ -981,6 +981,14 @@ namespace TbhDpsMeter
                         if (string.IsNullOrEmpty(g.Name) || g.Name == nameKey)
                             g.Name = string.IsNullOrEmpty(nameKey) ? "item" + Refl.ToI(Refl.Get(info, "ItemKey")) : nameKey;
 
+                        // GearScore inputs (all best-effort: 0/"" /null on failure so scoring degrades).
+                        // grade resolved BY TYPE (EGradeType) like the tooltip's _itemGradeProp — obfuscation-proof.
+                        if (dbg && !_gearDiagged) { _gearDiagged = true; DiagGearScore(item, info); }
+                        g.Grade = ReadGrade(item);
+                        g.Level = ReadItemLevel(item, info);
+                        g.Icon = ReadItemIcon(item, info);
+                        ReadSockets(item, g);
+
                         foreach (var slot in GearModSlots)
                         {
                             var mod = Refl.Get(item, slot);          // GearModData (struct)
@@ -999,6 +1007,93 @@ namespace TbhDpsMeter
                 }
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("ReadGear: " + e.Message); }
+        }
+
+        // ---- GearScore field readers (grade / item level / sockets / icon) ----
+
+        // grade: the item's EGradeType property, resolved once by TYPE (obfuscation-proof, same approach
+        // as the tooltip's _itemGradeProp). Returns the raw enum name (GearScore upper-cases it).
+        private static System.Reflection.PropertyInfo _gearGradeProp; private static bool _gearGradeTried;
+        private static string ReadGrade(object item)
+        {
+            if (item == null) return "";
+            if (!_gearGradeTried) { _gearGradeTried = true; _gearGradeProp = PropByTypeName(item.GetType(), "EGradeType"); }
+            try { return _gearGradeProp != null ? Refl.Str(_gearGradeProp.GetValue(item)) : ""; }
+            catch { return ""; }
+        }
+
+        // item level (the "需要等級" number). Candidate member names confirmed via DiagGearScore; the level
+        // may live on the ItemInfoData (info) or the item. Reads the first plausible value (1..200), else 0.
+        private static readonly string[] LevelMembers = { "RequireLevel", "RequiredLevel", "Level", "ItemLevel", "EquipLevel" };
+        private static int ReadItemLevel(object item, object info)
+        {
+            foreach (var src in new[] { info, item })
+                foreach (var m in LevelMembers)
+                {
+                    int v = Refl.ToI(Refl.Get(src, m) ?? Refl.Call(src, m));
+                    if (v >= 1 && v <= 200) return v;
+                }
+            return 0;
+        }
+
+        // icon sprite/texture for the panel. Returns a UnityEngine.Texture (Sprite.texture if a Sprite),
+        // stored as object on GearItem.Icon. null when unavailable -> panel shows a glyph instead.
+        private static readonly string[] IconMembers = { "Icon", "icon", "Sprite", "sprite", "IconSprite" };
+        private static object ReadItemIcon(object item, object info)
+        {
+            foreach (var src in new[] { item, info })
+                foreach (var m in IconMembers)
+                {
+                    var v = Refl.Get(src, m) ?? Refl.Call(src, m);
+                    if (v == null) continue;
+                    if (v is UnityEngine.Texture tex) return tex;
+                    if (v is UnityEngine.Sprite sp) return sp.texture;
+                    if (Refl.Get(v, "texture") is UnityEngine.Texture t) return t;   // Sprite-like wrapper
+                }
+            return null;
+        }
+
+        // socket contents (裝飾/雕刻/銘文 gems). Container + entry member names confirmed via DiagGearScore;
+        // each gem contributes a stat+value read like an affix (iox/ioy). Fails safe to "no sockets".
+        private static readonly string[] SocketContainers = { "DecoSlots", "CarveSlots", "InscribeSlots" };
+        private static void ReadSockets(object item, GearItem g)
+        {
+            foreach (var c in SocketContainers)
+            {
+                var col = Refl.Get(item, c) ?? Refl.Call(item, c);
+                if (col == null) continue;
+                foreach (var entry in Refl.Enumerate(col))
+                {
+                    if (entry == null) continue;
+                    string st = Refl.Str(Refl.Call(entry, "iox") ?? Refl.Get(entry, "iox"));
+                    if (string.IsNullOrEmpty(st) || st == "NONE" || st == "None") continue;
+                    double val = Refl.ToD(Refl.Call(entry, "ioy") ?? Refl.Get(entry, "ioy"));
+                    g.Sockets.Add(new Affix(st, val));
+                }
+            }
+        }
+
+        /// <summary>One-shot dump (DebugSnapshot-gated, first item only) to pin down item-level,
+        /// socket-container, and icon member paths on the live item. See plan Task 7.</summary>
+        private static bool _gearDiagged;
+        private static void DiagGearScore(object item, object info)
+        {
+            try
+            {
+                Log("[gearscore] item members (find level/socket/icon):");
+                DumpIntMembers(info, "   info.");
+                DumpIntMembers(item, "   item.");
+                foreach (var p in item.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (!p.CanRead || p.GetIndexParameters().Length != 0) continue;
+                    object v; try { v = p.GetValue(item); } catch { continue; }
+                    if (v == null) continue;
+                    var tn = v.GetType().Name;
+                    if (tn.Contains("List") || tn.Contains("Collection") || tn.Contains("Sprite") || tn.Contains("Texture") || tn.Contains("[]"))
+                        Log($"   item.{p.Name} -> {v.GetType().FullName}");
+                }
+            }
+            catch (Exception e) { Log("[gearscore] diag ex: " + e.Message); }
         }
 
         // candidate level accessors on the skill cache (uo): int getters + ObscuredInt fields
