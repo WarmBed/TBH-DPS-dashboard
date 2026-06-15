@@ -34,7 +34,16 @@ namespace TbhDpsMeter
         public int ItemKey;
         /// <summary>Item instance uid from the save (transient; used to fetch the live item for name lookup).</summary>
         public ulong Uid;
+        /// <summary>EGradeType name (e.g. "LEGENDARY"). "" = unknown -> scored as the lowest grade.</summary>
+        public string Grade = "";
+        /// <summary>Required/item level (the "需要等級" number). 0 = unknown -> contributes no level points.</summary>
+        public int Level;
         public readonly List<Affix> Affixes = new List<Affix>();
+        /// <summary>Contents of the 裝飾/雕刻/銘文 sockets, each as a stat+value (empty sockets omitted).</summary>
+        public readonly List<Affix> Sockets = new List<Affix>();
+        /// <summary>Item icon (a UnityEngine.Texture at runtime; typed object so the Unity-free
+        /// TrackerTests build can compile RunModels). null when unavailable -> panel shows a glyph.</summary>
+        [System.NonSerialized] public object Icon;
     }
 
     /// <summary>A treasure box obtained during a run, by type/rarity.</summary>
