@@ -57,6 +57,11 @@ namespace TbhDpsMeter
         private static ConfigEntry<string> _compareToggleKeyName;
         public static ConfigEntry<bool> DebugSnapshot;
 
+        // gear-score panel config
+        public static ConfigEntry<float> GearScorePosX, GearScorePosY, GearScorePanelWidth;
+        public static ConfigEntry<bool> GearScoreStartVisible;
+        private static ConfigEntry<string> _gearScoreToggleKeyName;
+
         // farming-planner panel config
         public static ConfigEntry<float> FarmPosX;
         public static ConfigEntry<float> FarmPosY;
@@ -113,6 +118,7 @@ namespace TbhDpsMeter
         public static KeyCode FarmToggleKey = KeyCode.F6;
         public static KeyCode BoxToggleKey = KeyCode.F5;
         public static KeyCode HubToggleKey = KeyCode.F1;
+        public static KeyCode GearScoreToggleKey = KeyCode.F7;
 
         private static int _dbgCount;
 
@@ -154,6 +160,12 @@ namespace TbhDpsMeter
             ComparePanelWidth = Config.Bind("CompareUI", "PanelWidth", 380f, "Stage-compare overlay panel width in pixels.");
             CompareStartVisible = Config.Bind("CompareUI", "StartVisible", false, "Show the stage-compare overlay on launch.");
             _compareToggleKeyName = Config.Bind("CompareUI", "ToggleKey", "F11", "Key to show/hide the stage-compare overlay (UnityEngine.KeyCode name).");
+
+            GearScorePosX = Config.Bind("GearScoreUI", "PosX", -1f, "Gear-score overlay X (auto-saved when dragged). -1 = auto.");
+            GearScorePosY = Config.Bind("GearScoreUI", "PosY", -1f, "Gear-score overlay Y (auto-saved when dragged). -1 = auto.");
+            GearScorePanelWidth = Config.Bind("GearScoreUI", "PanelWidth", 360f, "Gear-score overlay panel width in pixels.");
+            GearScoreStartVisible = Config.Bind("GearScoreUI", "StartVisible", false, "Show the gear-score overlay on launch.");
+            _gearScoreToggleKeyName = Config.Bind("GearScoreUI", "ToggleKey", "F7", "Key to show/hide the gear-score overlay (UnityEngine.KeyCode name).");
             DebugSnapshot = Config.Bind("Debug", "LogSnapshot", false, "Log character-snapshot reflection diagnostics to verify obfuscated member picks.");
 
             FarmPosX = Config.Bind("FarmUI", "PosX", -1f, "Farming-planner overlay X (auto-saved when dragged). -1 = auto.");
@@ -207,6 +219,8 @@ namespace TbhDpsMeter
                 BoxToggleKey = KeyCode.F5;
             if (!Enum.TryParse(_hubToggleKeyName.Value, true, out HubToggleKey))
                 HubToggleKey = KeyCode.F1;
+            if (!Enum.TryParse(_gearScoreToggleKeyName.Value, true, out GearScoreToggleKey))
+                GearScoreToggleKey = KeyCode.F7;
             if (!Enum.TryParse(_boxOpenToggleKeyName.Value, true, out BoxOpenToggleKey))
                 BoxOpenToggleKey = KeyCode.F4;
             if (!Enum.TryParse(_lootMapToggleKeyName.Value, true, out LootMapToggleKey))
@@ -252,6 +266,7 @@ namespace TbhDpsMeter
                 go.AddComponent<OverlayBehaviour>();
                 go.AddComponent<TakenOverlayBehaviour>();
                 go.AddComponent<CompareOverlayBehaviour>();
+                go.AddComponent<GearScoreOverlayBehaviour>();
                 go.AddComponent<FarmOverlayBehaviour>();
                 go.AddComponent<BoxOverlayBehaviour>();
                 go.AddComponent<HubOverlayBehaviour>();
