@@ -159,6 +159,13 @@ namespace TbhDpsMeter
             { "skill_changes",  new[] { "技能變更", "Skills", "スキル変更", "技能变更", "Habilidades" } },
             { "stat_changes",   new[] { "屬性", "Stats", "ステータス", "属性", "Atributos" } },
             { "no_runs",        new[] { "尚無紀錄", "No runs yet", "記録なし", "尚无记录", "Sin datos" } },
+            // gear-score panel
+            { "gearscore_title", new[] { "裝備評分", "Gear Score", "装備スコア", "装备评分", "Puntuación" } },
+            { "gearscore_empty", new[] { "找不到角色", "No characters found", "キャラ未検出", "找不到角色", "Sin personajes" } },
+            { "mode_simple",    new[] { "簡易", "Simple", "簡易", "简易", "Simple" } },
+            { "mode_detailed",  new[] { "詳細", "Detailed", "詳細", "详细", "Detalle" } },
+            { "grade",          new[] { "稀有度", "Rarity", "レア度", "稀有度", "Rareza" } },
+            { "level",          new[] { "等級", "Level", "レベル", "等级", "Nivel" } },
             { "reset_all",      new[] { "清除全部", "Reset all", "全削除", "清除全部", "Borrar todo" } },
             { "confirm_reset",  new[] { "確認清除?", "Confirm?", "確認?", "确认清除?", "¿Confirmar?" } },
             { "uncategorized",  new[] { "未分類", "Other", "未分類", "未分类", "Otros" } },
