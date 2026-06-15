@@ -8,14 +8,19 @@ namespace TbhDpsMeter
     public static class GearScore
     {
         // Base points per rarity. Keys are upper-cased EGradeType names; unknown -> Default.
+        // TBH's real 10-tier rarity ladder (from the wiki item data), increasing base points.
         private static readonly Dictionary<string, double> GradeBase = new Dictionary<string, double>
         {
-            { "COMMON", 0 }, { "NORMAL", 0 },
-            { "UNCOMMON", 50 }, { "MAGIC", 50 },
+            { "COMMON", 0 },
+            { "UNCOMMON", 50 },
             { "RARE", 120 },
-            { "EPIC", 250 },
-            { "LEGENDARY", 450 },
-            { "MYTHIC", 700 },
+            { "LEGENDARY", 250 },
+            { "IMMORTAL", 450 },
+            { "ARCANA", 700 },
+            { "BEYOND", 1000 },
+            { "CELESTIAL", 1400 },
+            { "DIVINE", 1900 },
+            { "COSMIC", 2500 },
         };
         private const double GradeDefault = 0;
         private const double LevelWeight = 2.0;

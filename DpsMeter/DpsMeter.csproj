@@ -22,6 +22,7 @@
     <!-- wiki datasets, shipped inside the DLL (offline; no extra files for the user) -->
     <EmbeddedResource Include="farm_stages.json" />
     <EmbeddedResource Include="item_names.json" />
+    <EmbeddedResource Include="item_meta.json" />
   </ItemGroup>
 
   <ItemGroup>

@@ -212,15 +212,15 @@ class Tests
         giLegendary.Affixes.Add(new Affix("attack", 100));      // 100*1
         giLegendary.Sockets.Add(new Affix("critrate", 0.03));   // 0.03*1000 = 30
         var isLeg = GearScore.ScoreItem(giLegendary);
-        // 450 (grade) + 160 (80*2) + 100 (attack) + 30 (socket crit) = 740
-        Check("gearscore item = 740", Near(isLeg.Total, 740), isLeg.Total);
+        // 250 (LEGENDARY) + 160 (80*2) + 100 (attack) + 30 (socket crit) = 540
+        Check("gearscore item = 540", Near(isLeg.Total, 540), isLeg.Total);
         Check("gearscore unknown grade = 0 base", Near(GearScore.GradePoints(""), 0), GearScore.GradePoints(""));
         Check("gearscore unknown stat weight = 1", Near(GearScore.WeightOf("nonsense"), 1), GearScore.WeightOf("nonsense"));
 
         var gsSnap = new CharacterSnapshot();
         gsSnap.Equipment.Add(giLegendary);
         gsSnap.Equipment.Add(new GearItem { Grade = "RARE", Level = 0 });   // 120 + 0
-        Check("gearscore character total = 860", Near(GearScore.ScoreCharacter(gsSnap).Total, 860), GearScore.ScoreCharacter(gsSnap).Total);
+        Check("gearscore character total = 660", Near(GearScore.ScoreCharacter(gsSnap).Total, 660), GearScore.ScoreCharacter(gsSnap).Total);
         // attack/defence split: attack=100 (offensive), hp is defensive
         var giMix = new GearItem();
         giMix.Affixes.Add(new Affix("attack", 100));  // offensive

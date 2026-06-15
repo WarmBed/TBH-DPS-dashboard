@@ -158,8 +158,10 @@ namespace TbhDpsMeter
                             string nm = ItemNameStore.Get(g.ItemKey);
                             if (string.IsNullOrEmpty(nm)) nm = HeroProbe.ResolveItemName(g.ItemKey, g.Uid);
                             if (!string.IsNullOrEmpty(nm)) g.Name = nm;
-                            // grade / item level / icon are template-only; fetch the live item by uid (best-effort)
-                            HeroProbe.EnrichGearFromLive(g);
+                            // grade / item level are template-only (not on the save instance, and the live
+                            // item can't be fetched by save uid) — read them from the bundled wiki meta table.
+                            g.Grade = ItemMetaStore.Grade(g.ItemKey);
+                            g.Level = ItemMetaStore.Level(g.ItemKey);
                             snap.Equipment.Add(g);
                         }
                     }

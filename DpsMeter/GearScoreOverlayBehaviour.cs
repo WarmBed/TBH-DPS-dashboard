@@ -206,16 +206,21 @@ namespace TbhDpsMeter
             finally { GUI.matrix = prevM; }
         }
 
-        // grade -> hex colour (common grey .. legendary gold). Unknown -> grey.
+        // grade -> hex colour across TBH's 10-tier rarity ladder. Unknown -> grey.
         private static string GradeColor(string grade)
         {
             switch ((grade ?? "").ToUpperInvariant())
             {
-                case "LEGENDARY": case "MYTHIC": return "FFB13B";
-                case "EPIC": return "C56BFF";
-                case "RARE": return "4FA8FF";
-                case "UNCOMMON": case "MAGIC": return "5fd07c";
-                default: return "cdd5df";
+                case "COSMIC": return "FF4D6D";      // red-pink
+                case "DIVINE": return "FFD24D";      // gold
+                case "CELESTIAL": return "63E6E2";   // cyan
+                case "BEYOND": return "B197FC";      // violet
+                case "ARCANA": return "F783AC";      // pink
+                case "IMMORTAL": return "FF922B";    // orange
+                case "LEGENDARY": return "FFB13B";   // amber
+                case "RARE": return "4FA8FF";        // blue
+                case "UNCOMMON": return "5FD07C";    // green
+                default: return "CDD5DF";            // common / unknown — grey
             }
         }
     }
