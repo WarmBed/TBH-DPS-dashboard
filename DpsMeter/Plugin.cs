@@ -14,7 +14,7 @@ namespace TbhDpsMeter
     {
         public const string Guid = "tbh.dpsmeter";
         public const string Name = "TBH DPS Meter";
-        public const string Version = "0.9.5";
+        public const string Version = "0.9.6";
 
         public static DpsTracker Tracker;
         public static DamageTakenTracker TakenTracker;
@@ -225,8 +225,7 @@ namespace TbhDpsMeter
             TakenTracker = new DamageTakenTracker(WindowSeconds.Value);
 
             var harmony = new Harmony(Guid);
-            TryPatch(harmony, typeof(Monster_TakeDamage_Patch), "Monster.ebj damage hook");
-            TryPatch(harmony, typeof(Hero_TakeDamage_Patch), "Hero.gnr damage-taken hook");
+            DamageHooks.TryHook(harmony);   // Monster damage, signature-resolved (edg/gpw probe)
             TryPatch(harmony, typeof(StageState_Patch), "StageManager.set_stageState wave hook");
             StageProbe.TryHook(harmony);
 

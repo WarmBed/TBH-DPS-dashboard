@@ -90,8 +90,26 @@ namespace TbhDpsMeter
                     .TryCast<TaskbarHero.Log.BoxOpenLog>();
                 if (bol == null) return;
 
-                int grade = (int)bol.beoi;          // EGradeType
-                string name = bol.beoh ?? "";       // item name
+                // Resolve grade/name by PROPERTY TYPE, not obfuscated name (beoi/beoh → bfds/bfdr → …
+                // churn every game update). BoxOpenLog has exactly one EGradeType and one string prop.
+                int grade = 0; string name = "";
+                bool gotGrade = false, gotName = false;
+                foreach (var p in bol.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (!p.CanRead || p.GetIndexParameters().Length != 0) continue;
+                    if (!gotGrade && p.PropertyType.Name == "EGradeType")
+                    { try { grade = Convert.ToInt32(p.GetValue(bol)); gotGrade = true; } catch { } }
+                    else if (!gotName && p.PropertyType == typeof(string))
+                    { try { name = p.GetValue(bol) as string ?? ""; gotName = true; } catch { } }
+                }
+                // Post-2026-06 the name field carries a raw localization key ("ItemName_520017") rather than
+                // a localized string; resolve it through the embedded name store (digits = ItemKey).
+                if (!string.IsNullOrEmpty(name) && name.IndexOf("ItemName", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    var dm = System.Text.RegularExpressions.Regex.Match(name, @"\d+");
+                    if (dm.Success && int.TryParse(dm.Value, out int ik))
+                    { string loc = ItemNameStore.Get(ik); if (!string.IsNullOrEmpty(loc)) name = loc; }
+                }
                 string stage = ""; try { stage = CharacterReader.CurrentStageId(); } catch { }
 
                 Stats.Add(new BoxOpenEvent { Time = DateTime.Now, Grade = grade, Kind = _openingKind, Name = name, Stage = stage });

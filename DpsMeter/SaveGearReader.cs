@@ -27,6 +27,35 @@ namespace TbhDpsMeter
         /// in-memory exp accessor so per-run exp deltas survive obfuscation renames.</summary>
         public static readonly Dictionary<int, double> LastHeroExp = new Dictionary<int, double>();
 
+        /// <summary>Account gold from the save's currenySaveDatas (the game's own misspelling) entry whose
+        /// Key == 100001. The live in-memory currency store is obfuscated (ue+su churns every update); the
+        /// save's plain Key/Quantity is the stable source. Populated by <see cref="ReadGold"/>/ReadParty.</summary>
+        public static long LastGold;
+        private const int GoldCurrencyKey = 100001;
+
+        /// <summary>Decrypt the live save and return current account gold (Key 100001 Quantity), or the last
+        /// known value on failure. Cheap enough for run-boundary calls; not for per-frame use.</summary>
+        public static long ReadGold()
+        {
+            try
+            {
+                string path = Path.Combine(UnityEngine.Application.persistentDataPath, "SaveFile_Live.es3");
+                if (!File.Exists(path)) return LastGold;
+                string json = Decrypt(File.ReadAllBytes(path), Password);
+                if (string.IsNullOrEmpty(json)) return LastGold;
+                var outer = Json.Parse(json);
+                string inas = Json.Str(Json.Get(Json.Get(outer, "PlayerSaveData"), "value"));
+                var inner = string.IsNullOrEmpty(inas) ? outer : Json.Parse(inas);
+                var curr = FindArray(inner, "currenySaveDatas");
+                if (curr != null)
+                    foreach (var c in curr)
+                        if ((int)Json.Num(Json.Get(c, "Key")) == GoldCurrencyKey)
+                        { LastGold = Json.Long(Json.Get(c, "Quantity")); break; }
+            }
+            catch { }
+            return LastGold;
+        }
+
         /// <summary>Active-skill levels per heroKey, sorted by talent key — read from the save's
         /// attributeSaveDatas. The talent tree's column-3/4 nodes (key%10 ∈ {3,4}) ARE the active skills;
         /// their Level is the real in-game skill level (the obfuscated in-memory level field is NOT — it

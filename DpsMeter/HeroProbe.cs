@@ -263,7 +263,9 @@ namespace TbhDpsMeter
             catch { return ""; }
         }
 
-        /// <summary>Try to register a postfix on UI_Stage.hqk(StageCache, bool) to capture the active stage.</summary>
+        /// <summary>Try to register a postfix on UI_Stage's stage-entry method to capture the active stage.
+        /// Resolve the method by SIGNATURE — (StageCache, bool) — not its obfuscated name (hqk→hup→… churns
+        /// every game update). The stage-directing entry is the only instance method shaped that way.</summary>
         public static void TryHook(Harmony harmony)
         {
             try
@@ -272,11 +274,15 @@ namespace TbhDpsMeter
                 if (t == null) { Plugin.Logger?.LogWarning("StageProbe: UI_Stage not found"); return; }
                 MethodInfo target = null;
                 foreach (var m in t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
-                    if (m.Name == "hqk") { target = m; break; }
-                if (target == null) { Plugin.Logger?.LogWarning("StageProbe: UI_Stage.hqk not found"); return; }
+                {
+                    var ps = m.GetParameters();
+                    if (ps.Length == 2 && ps[0].ParameterType.Name == "StageCache" && ps[1].ParameterType == typeof(bool))
+                    { target = m; break; }
+                }
+                if (target == null) { Plugin.Logger?.LogWarning("StageProbe: UI_Stage (StageCache,bool) method not found"); return; }
                 var post = new HarmonyMethod(typeof(StageProbe).GetMethod(nameof(Captured), BindingFlags.NonPublic | BindingFlags.Static));
                 harmony.Patch(target, postfix: post);
-                Plugin.Logger?.LogInfo("StageProbe: hooked UI_Stage.hqk");
+                Plugin.Logger?.LogInfo("StageProbe: hooked UI_Stage." + target.Name + " (StageCache,bool)");
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("StageProbe.TryHook: " + e.Message); }
         }
@@ -426,11 +432,13 @@ namespace TbhDpsMeter
         private static bool Resolved(string s, string key)
             => !string.IsNullOrEmpty(s) && s != key && s.IndexOf("No translation", StringComparison.Ordinal) < 0;
 
+        private static System.Reflection.MethodInfo _locMethod;   // resolved localization facade: String(String)
+        private static bool _locTried;
+
         public static string GameLoc(string key)
         {
             if (string.IsNullOrEmpty(key)) return key;
-            // nm.gbu resolves in the game's CURRENT language (verified: HeroName_201 -> 遊俠);
-            // nm.gbs returns English. Prefer gbu, fall back to gbs, then the raw key.
+            // Fast path: the historical facade nm.gbu (current language) / nm.gbs (English).
             try
             {
                 string s = Refl.Str(Refl.CallStatic("nm", "gbu", key));
@@ -439,7 +447,76 @@ namespace TbhDpsMeter
                 if (Resolved(s, key)) return s;
             }
             catch { }
+            // Self-healing: the facade class/method churns every update (nm.gbu → …). Discover ANY static
+            // String(String) method that TRANSLATES a known-present key yet PASSES THROUGH a garbage key —
+            // that pass-through signature is unique to the localization lookup (transforms alter both).
+            var m = LocMethod();
+            if (m != null)
+            {
+                try { string s = m.Invoke(null, new object[] { key }) as string; if (Resolved(s, key)) return s; }
+                catch { }
+            }
             return key;
+        }
+
+        private static bool HasNonAscii(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return false;
+            foreach (char c in s) if (c > 127) return true;
+            return false;
+        }
+
+        private static System.Reflection.MethodInfo LocMethod()
+        {
+            if (_locTried) return _locMethod;
+            _locTried = true;
+            // keys that MUST exist in the default string table (skills are what we ultimately need; heroes too)
+            string[] valid = { "SkillName_10101", "SkillName_10301", "HeroName_101", "HeroName_201" };
+            const string garbage = "__tbh_no_such_key__";
+            try
+            {
+                System.Reflection.MethodInfo asciiFallback = null; string asciiHit = null;
+                foreach (var t in typeof(Hero).Assembly.GetTypes())
+                {
+                    System.Reflection.MethodInfo[] ms;
+                    try { ms = t.GetMethods(BindingFlags.Public | BindingFlags.Static); } catch { continue; }
+                    foreach (var m in ms)
+                    {
+                        if (m.ReturnType != typeof(string)) continue;
+                        var ps = m.GetParameters();
+                        if (ps.Length != 1 || ps[0].ParameterType != typeof(string)) continue;
+                        try
+                        {
+                            // must TRANSLATE at least one known key (game returns "No translation..." when missing,
+                            // so use Resolved() rather than a raw key compare) AND must NOT "translate" garbage
+                            string hitKey = null, hitVal = null;
+                            foreach (var vk in valid) { string rv = m.Invoke(null, new object[] { vk }) as string; if (Resolved(rv, vk)) { hitKey = vk; hitVal = rv; break; } }
+                            if (hitKey == null) continue;
+                            string rg = m.Invoke(null, new object[] { garbage }) as string;
+                            if (Resolved(rg, garbage)) continue;                       // a transform, not a lookup
+                            // Two facades exist: current-language and forced-English (old gbu vs gbs). Prefer the
+                            // current-language one — its output carries non-ASCII glyphs for CJK/accented locales.
+                            if (HasNonAscii(hitVal))
+                            {
+                                _locMethod = m;
+                                Plugin.Logger?.LogInfo("[selfcheck] localization facade -> " + t.Name + "." + m.Name + " (" + hitKey + "=" + hitVal + ") [current-lang]");
+                                return _locMethod;
+                            }
+                            if (asciiFallback == null) { asciiFallback = m; asciiHit = t.Name + "." + m.Name + " (" + hitKey + "=" + hitVal + ")"; }
+                        }
+                        catch { }
+                    }
+                }
+                if (asciiFallback != null)
+                {
+                    _locMethod = asciiFallback;   // English-only game, or no CJK facade found
+                    Plugin.Logger?.LogInfo("[selfcheck] localization facade -> " + asciiHit + " [ascii]");
+                    return _locMethod;
+                }
+                Plugin.Logger?.LogWarning("[selfcheck] localization facade -> MISSING (skill/hero names will show keys)");
+            }
+            catch { }
+            return _locMethod;
         }
 
         // item names live in a non-default Localization table; try gbt(table, key) candidates.
@@ -465,14 +542,9 @@ namespace TbhDpsMeter
 
         public static long ReadGold(int key = GoldKey)
         {
-            // ue+su.iko(key) -> sv holder; sv.iks() -> Int64 balance. Fall back to ikn(key).
-            try
-            {
-                var sv = Refl.CallStatic("ue+su", "iko", key);
-                if (sv != null) { long v = Convert.ToInt64(Refl.Call(sv, "iks") ?? 0L); if (v != 0) return v; }
-                return Convert.ToInt64(Refl.CallStatic("ue+su", "ikn", key) ?? 0L);
-            }
-            catch { return 0; }
+            // The in-memory currency store (ue+su) is obfuscated and re-randomised every game update.
+            // The save's plain currenySaveDatas[Key=100001].Quantity is the stable source — read it there.
+            return SaveGearReader.ReadGold();
         }
 
         private static System.Reflection.MemberInfo _expMember;
@@ -586,8 +658,38 @@ namespace TbhDpsMeter
         // managed getter on a live object: safe, unlike a blind static-getter sweep. All obfuscated names
         // (bcnm/brkc/brkj/brkk/tf/ue+ti) churn on game updates — re-derive via this same metadata approach.
         private static bool _ttPollInit; private static Type _ttType, _ttItemT;
-        private static System.Reflection.PropertyInfo _bcnm;   // ItemTooltip.bcnm = the shown item (type tf)
+        private static System.Reflection.PropertyInfo _bcnm;   // ItemTooltip's item-data property (was bcnm; type uc)
+        private static System.Reflection.PropertyInfo _itemKeyProp, _itemTypeProp, _itemGradeProp;
         private static System.Reflection.MethodInfo _findAll;
+
+        private static System.Reflection.PropertyInfo PropByTypeName(Type t, string typeName)
+        {
+            if (t == null) return null;
+            foreach (var p in t.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                if (p.CanRead && p.GetIndexParameters().Length == 0 && p.PropertyType.Name == typeName) return p;
+            return null;
+        }
+
+        /// <summary>The item's ItemKey property on the tooltip item type — the int-valued member whose value
+        /// is a known key in the embedded name store. Resolved once by value-match (obfuscation-proof).</summary>
+        private static int ItemKeyOf(object item)
+        {
+            if (item == null) return 0;
+            try
+            {
+                if (_itemKeyProp != null) return Refl.ToI(_itemKeyProp.GetValue(item));
+                foreach (var p in item.GetType().GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+                {
+                    if (!p.CanRead || p.GetIndexParameters().Length != 0) continue;
+                    string tn = p.PropertyType.Name;
+                    if (tn != "Int32" && tn != "ObscuredInt") continue;
+                    int v = Refl.ToI(p.GetValue(item));
+                    if (v > 0 && !string.IsNullOrEmpty(ItemNameStore.Get(v))) { _itemKeyProp = p; Plugin.Logger?.LogInfo("[price] item key prop -> " + p.Name + " (" + v + ")"); return v; }
+                }
+            }
+            catch { }
+            return 0;
+        }
 
         public static void PollHoveredItem()
         {
@@ -598,12 +700,20 @@ namespace TbhDpsMeter
                     _ttPollInit = true;
                     var asm = typeof(TaskbarHero.StageManager).Assembly;
                     foreach (var t in asm.GetTypes()) if (t.Name == "ItemTooltip") { _ttType = t; break; }
-                    var ti = Refl.FindType("ue+ti") ?? Refl.FindType("ue.ti");
-                    if (ti != null) foreach (var m in ti.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
-                        if ((m.Name == "hcb" || m.Name == "isk" || m.Name == "opd") && !m.ReturnType.IsPrimitive && m.ReturnType != typeof(void) && m.ReturnType != typeof(string)) { _ttItemT = m.ReturnType; break; }
-                    if (_ttType != null && _ttItemT != null)
+                    // The shown item is the tooltip property whose TYPE carries both an EGradeType and an
+                    // EItemType member (uniquely the item-data type, was tf/uc). Resolve by type, not name.
+                    if (_ttType != null)
                         foreach (var p in _ttType.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
-                            if (p.CanRead && p.PropertyType == _ttItemT) { _bcnm = p; if (p.Name == "bcnm") break; }
+                        {
+                            if (!p.CanRead || p.GetIndexParameters().Length != 0) continue;
+                            if (PropByTypeName(p.PropertyType, "EGradeType") != null && PropByTypeName(p.PropertyType, "EItemType") != null)
+                            { _bcnm = p; _ttItemT = p.PropertyType; break; }
+                        }
+                    if (_ttItemT != null)
+                    {
+                        _itemTypeProp = PropByTypeName(_ttItemT, "EItemType");
+                        _itemGradeProp = PropByTypeName(_ttItemT, "EGradeType");
+                    }
                     // Resources.FindObjectsOfTypeAll<ItemTooltip>() catches pooled instances too; it's a generic
                     // method definition so GetMethod(name,types) won't match it — scan. Fall back to the singular.
                     System.Reflection.MethodInfo gdef = null;
@@ -633,13 +743,13 @@ namespace TbhDpsMeter
                     bool active = false; try { active = Convert.ToBoolean(Refl.Get(Refl.Get(inst, "gameObject"), "activeInHierarchy")); } catch { }
                     if (!active) continue;
                     object v = null; try { v = _bcnm.GetValue(inst); } catch { }
-                    int k = v != null ? Refl.ToI(Refl.Get(v, "brkc")) : 0;
+                    int k = v != null ? ItemKeyOf(v) : 0;
                     if (k != 0) { chosen = v; chosenInst = inst; chosenKey = k; break; }
                 }
                 if (chosen == null) { HoveredKey = 0; HoveredTooltip = null; return; }   // nothing hovered -> hide
                 HoveredItem = chosen; HoveredKey = chosenKey; HoveredAt = Time.realtimeSinceStartup; HoveredTooltip = chosenInst;
-                HoveredIsGear = string.Equals(Refl.Str(Refl.Get(chosen, "brkj")), "GEAR", StringComparison.OrdinalIgnoreCase);
-                HoveredGrade = TitleCase(Refl.Str(Refl.Get(chosen, "brkk")));
+                HoveredIsGear = _itemTypeProp != null && string.Equals(Refl.Str(_itemTypeProp.GetValue(chosen)), "GEAR", StringComparison.OrdinalIgnoreCase);
+                HoveredGrade = _itemGradeProp != null ? TitleCase(Refl.Str(_itemGradeProp.GetValue(chosen))) : "";
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("[price] poll: " + e.Message); }
         }
@@ -815,7 +925,19 @@ namespace TbhDpsMeter
                 // The IReadOnlyCollection<ObscuredULong> can't be reflection-enumerated or cast to a
                 // concrete List, but it DOES TryCast to the non-generic Il2Cpp IEnumerable (verified
                 // in-game), whose enumerator we can drive. ue.ti.opd(uid) -> item (tf).
-                object colObj = hero.cache.brqt;
+                // Resolve the equipped-uid collection by PROPERTY TYPE (IReadOnlyCollection<ObscuredULong>),
+                // not obfuscated name (brqt → bsht → … churns every update). It's the only such prop on cache.
+                object cacheObj = hero.cache;
+                object colObj = null;
+                if (cacheObj != null)
+                    foreach (var p in cacheObj.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                    {
+                        if (!p.CanRead || p.GetIndexParameters().Length != 0) continue;
+                        if (p.PropertyType.Name.StartsWith("IReadOnlyCollection")
+                            && p.PropertyType.IsGenericType
+                            && p.PropertyType.GetGenericArguments()[0].Name == "ObscuredULong")
+                        { try { colObj = p.GetValue(cacheObj); } catch { } break; }
+                    }
                 var col = colObj as Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase;
                 var seq = col?.TryCast<Il2CppSystem.Collections.IEnumerable>();
                 bool dbg0 = Plugin.DebugSnapshot != null && Plugin.DebugSnapshot.Value;

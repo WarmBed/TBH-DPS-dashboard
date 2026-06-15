@@ -22,7 +22,7 @@ namespace TbhDpsMeter
                     T("Hero", "TaskbarHero.Hero") + " " +
                     T("EMainTab", "TaskbarHero.EMainTab") + " " +
                     T("ESTAGEDIFFICULTY", "TaskbarHero.Data.ESTAGEDIFFICULTY") + " " +
-                    T("StageCache", "ue+StageCache");
+                    "StageCache=" + (FindStageCache() != null ? "OK" : "MISSING");
                 Plugin.Logger?.LogInfo("[selfcheck] types: " + types);
 
                 // TYPE-resolved fields (the resilient lookups the plugin actually uses at runtime).
@@ -30,7 +30,7 @@ namespace TbhDpsMeter
                 var ui = Refl.FindType("TaskbarHero.UIManager");
                 Plugin.Logger?.LogInfo("[selfcheck] UIManager.currentTab (settable EMainTab) -> " + Prop(ui, "EMainTab", true));
 
-                var sc = Refl.FindType("ue+StageCache") ?? Refl.FindType("StageCache");
+                var sc = FindStageCache();
                 Plugin.Logger?.LogInfo("[selfcheck] StageCache.difficulty (ESTAGEDIFFICULTY) -> " + Prop(sc, "ESTAGEDIFFICULTY", false)
                     + " ; label = first string field shaped \"N-N\" (resolved at capture)");
 
@@ -41,6 +41,19 @@ namespace TbhDpsMeter
         }
 
         private static string T(string label, string full) => label + "=" + (Refl.FindType(full) != null ? "OK" : "MISSING");
+
+        /// <summary>Resolve the nested StageCache type by its (non-obfuscated) simple name, regardless of
+        /// which obfuscated wrapper currently declares it (ue+StageCache → vb+StageCache → … churns).</summary>
+        internal static Type FindStageCache()
+        {
+            try
+            {
+                foreach (var t in typeof(TaskbarHero.Hero).Assembly.GetTypes())
+                    if (t.Name == "StageCache") return t;
+            }
+            catch { }
+            return null;
+        }
 
         /// <summary>Name of the first property of the given type (optionally settable), or a status token.</summary>
         private static string Prop(Type t, string propTypeName, bool needSetter)

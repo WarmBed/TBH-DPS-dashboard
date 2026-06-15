@@ -79,6 +79,30 @@ class Program
                         Console.WriteLine($"  {t.FullName}::{Sig(m)}");
             }
         }
+        else if (mode == "sig")
+        {
+            // find methods by SIGNATURE: sig <retTypeName> [paramTypeName ...]  ('*' = any)
+            // matches by simple type-name (case-insensitive). Use to relocate obfuscated helpers after
+            // a game update when both type and method names churn (e.g. gold/item/box static helpers).
+            string ret = args.Length > 1 ? args[1].ToLowerInvariant() : "*";
+            var ptypes = args.Skip(2).Select(s => s.ToLowerInvariant()).ToArray();
+            foreach (var t in allTypes)
+            {
+                MethodInfo[] ms;
+                try { ms = t.GetMethods(BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance|BindingFlags.Static|BindingFlags.DeclaredOnly); }
+                catch { continue; }
+                foreach (var m in ms)
+                {
+                    var ps = m.GetParameters();
+                    if (ps.Length != ptypes.Length) continue;
+                    if (ret != "*" && (m.ReturnType.Name ?? "").ToLowerInvariant() != ret) continue;
+                    bool ok = true;
+                    for (int i = 0; i < ptypes.Length; i++)
+                        if (ptypes[i] != "*" && (ps[i].ParameterType.Name ?? "").ToLowerInvariant() != ptypes[i]) { ok = false; break; }
+                    if (ok) Console.WriteLine($"  {t.FullName}::{Sig(m)}{(m.IsStatic?"  [static]":"")}");
+                }
+            }
+        }
         return 0;
     }
 
