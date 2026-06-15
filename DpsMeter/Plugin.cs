@@ -254,6 +254,7 @@ namespace TbhDpsMeter
                 ClassInjector.RegisterTypeInIl2Cpp<OverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<TakenOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<CompareOverlayBehaviour>();
+                ClassInjector.RegisterTypeInIl2Cpp<GearScoreOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<FarmOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<BoxOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<HubOverlayBehaviour>();
