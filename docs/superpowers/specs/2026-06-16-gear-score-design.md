@@ -33,6 +33,7 @@ itemScore =  gradeBase[稀有度]
 - `Grade`(string):稀有度 / EGradeType 名稱。
 - `Level`(int):裝備等級(截圖的「需要等級」)。0 = 未知。
 - `Sockets`(List):三槽內容物,每個內容物帶屬性名 + 數值(複用 `Affix` 結構或等價型別)。空槽不列入。
+- `Icon`(transient,不序列化):該裝備的 sprite/texture 參考,供面板畫 icon。讀不到為 null。
 
 ### `HeroProbe.ReadGear` 補抓
 - `Grade` ← 沿用 hover price 邏輯已驗證的 `brkk`(EGradeType),套用同一個 live item 物件。
@@ -43,7 +44,7 @@ itemScore =  gradeBase[稀有度]
 
 ### 純計分邏輯
 新檔 `GearScore.cs`,無 Unity / BepInEx 依賴,可在 `TrackerTests` 單元測試,與 `StageCompare.cs` 同風格。對外提供:
-- 單件 `ScoreItem(GearItem)` → double。
+- 單件 `ScoreItem(GearItem)` → 該件總分 **+ 逐項貢獻明細**(gradeBase / 等級 / 每條詞綴 / 每個槽內容物各自的分數),供「詳細」檢視逐條顯示。
 - 角色 `ScoreCharacter(CharacterSnapshot)` → 總分 + 逐件分數明細。
 
 ## 顯示
@@ -51,7 +52,10 @@ itemScore =  gradeBase[稀有度]
 ### 新分頁「裝備評分」(主畫面)
 - 新增 `GearScoreOverlayBehaviour`,在 `Awake()` 呼叫 `PanelRegistry.Register(...)` 自動掛上 F1 中控台,不需改 hub。結構抄 `CompareOverlayBehaviour`。
 - 即時顯示全隊每個角色的**總分**(`HeroProbe.FindParty()` 已讀整隊;solo 自動退化成單一角色)。
-- 可展開看**逐件分數**:部位 / 名稱 / 稀有度 / 裝備等級 / 該件分數。
+- **詳細 / 簡易兩種檢視,以面板內一個開關按鈕切換**:
+  - **簡易**:每個角色總分 + 逐件一行(icon / 部位 / 名稱 / 稀有度 / 裝備等級 / 該件分數)。
+  - **詳細**:在簡易的逐件行下展開,列出該件每一條**效果**(詞綴 + 三槽內容物),**每條效果旁標出它貢獻幾分**,讓使用者看得出分數如何由稀有度 / 等級 / 各效果組成。
+- **裝備 icon**:每件行首顯示。`ReadGear` 嘗試讀該裝備的 sprite/texture(**待查證**);讀得到就用 `GUI.DrawTexture` 畫出,讀不到退回部位字元 / 文字(降級)。
 - 不依賴比較模式,隨時可看當下裝分。
 
 ### F1 中控台
@@ -63,15 +67,15 @@ itemScore =  gradeBase[稀有度]
 
 ## 驗證風險
 
-唯一不確定處:**裝備等級** 與 **三槽內容物** 的反射讀取路徑(IL2CPP 混淆欄位)。
+不確定處:**裝備等級**、**三槽內容物**、**裝備 icon sprite** 的反射讀取路徑(IL2CPP 混淆欄位)。
 
-- 實作計畫第一步:加一次性 `DiagGearScore` dump(沿用 `HeroProbe.Diagnose` 手法),進遊戲跑一次,確認等級欄位與三槽容器路徑、並順便擷取真實詞綴值供係數校準。
+- 實作計畫第一步:加一次性 `DiagGearScore` dump(沿用 `HeroProbe.Diagnose` 手法),進遊戲跑一次,確認等級欄位、三槽容器路徑、icon sprite 路徑,並順便擷取真實詞綴值供係數校準。
 - 防呆降級:
   - 裝備等級讀不到 → 該項以 0 計(不計等級分),總分仍可算。
   - 三槽內容物讀不到 → 退回「只算已填充槽數 × 固定分」。
   - 稀有度讀不到 → `gradeBase` 以 COMMON 計。
+  - icon 讀不到 → 退回部位字元 / 文字,不畫圖。
 
 ## 不在本期範圍(YAGNI)
 - 關卡比較頁的逐件裝分差值。
 - 係數設定檔化 / 使用者自訂權重 UI。
-- 逐部位「分數從何組成」的展開明細(可作為後續第 3 層)。
