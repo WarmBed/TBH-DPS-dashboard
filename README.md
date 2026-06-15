@@ -170,7 +170,29 @@ to it for the text itself, saved as `UI.FontSize` and `UI.FontSizeSmall`.
 4. **Launch through Steam** (launching the exe directly will NOT load the plugin).
 5. First launch shows a black screen for 1–3 minutes (one-time setup). Then it's normal.
 
-### B. Updating the plugin (already installed before)
+### B. macOS CrossOver check/repair
+On CrossOver, Wine may load its built-in `winhttp.dll` instead of the BepInEx proxy, or macOS may
+quarantine downloaded files. If no overlay appears and `<game folder>\BepInEx\LogOutput.log` is not
+created, run this from the repo root:
+
+```sh
+bash scripts/repair-crossover-macos.sh --check
+```
+
+If the check reports a missing `winhttp` override or quarantine marker, repair and relaunch through
+Steam:
+
+```sh
+bash scripts/repair-crossover-macos.sh --repair --launch
+```
+
+You usually do not need to specify a bottle; the script scans for the CrossOver bottle containing
+`TaskBarHero.exe`. If you have multiple CrossOver bottles, add `--bottle "<your-bottle-name>"`; for a
+non-standard Steam library, add `--game-dir "/path/to/TaskbarHero"`. `--check` is read-only.
+`--repair` only clears macOS quarantine metadata and sets the scoped Wine override for
+`TaskBarHero.exe`; it does not change game values or plugin code.
+
+### C. Updating the plugin (already installed before)
 **Yes — updating only needs the single DLL.** BepInEx itself stays untouched.
 
 Overwrite the new `TBH.DpsMeter.dll` into:

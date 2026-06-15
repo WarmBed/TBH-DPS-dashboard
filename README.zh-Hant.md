@@ -154,7 +154,22 @@
 4. **一定要透過 Steam 啟動**遊戲（直接點 exe 不會載入外掛）。
 5. 第一次啟動會黑畫面 1～3 分鐘（一次性分析），之後正常。
 
-### B. 更新外掛（已經裝過、只是換新版）
+### B. macOS CrossOver 檢查／修復
+在 CrossOver 上，Wine 可能載入內建的 `winhttp.dll`，而不是 BepInEx 的 proxy；macOS 也可能把下載下來的檔案標成 quarantine。若遊戲內沒有 overlay，且 `<遊戲資料夾>\BepInEx\LogOutput.log` 沒有產生，請在 repo 根目錄先檢查：
+
+```sh
+bash scripts/repair-crossover-macos.sh --check
+```
+
+如果檢查結果顯示缺少 `winhttp` override 或有 quarantine 標記，再執行修復並透過 Steam 重開：
+
+```sh
+bash scripts/repair-crossover-macos.sh --repair --launch
+```
+
+通常不需要指定 bottle；腳本會自動掃描含有 `TaskBarHero.exe` 的 CrossOver bottle。如果你有多個 CrossOver bottle，請加上 `--bottle "<your-bottle-name>"`；如果 Steam library 不在預設位置，請加上 `--game-dir "/path/to/TaskbarHero"`。`--check` 是唯讀檢查；`--repair` 只會清除 macOS quarantine metadata，並替 `TaskBarHero.exe` 設定 scoped Wine override，不會修改遊戲數值或外掛程式碼。
+
+### C. 更新外掛（已經裝過、只是換新版）
 **對，更新只要換 DLL 一個檔案就好。** BepInEx 本體不用動。
 
 把新版 `TBH.DpsMeter.dll` 覆蓋到：
