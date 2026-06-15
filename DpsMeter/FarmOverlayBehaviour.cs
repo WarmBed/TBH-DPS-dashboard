@@ -202,8 +202,9 @@ namespace TbhDpsMeter
             _tiny.normal.textColor = new Color(0.7f, 0.75f, 0.85f);
             _col = new GUIStyle { fontSize = fs, richText = true, alignment = TextAnchor.MiddleRight };
             _col.normal.textColor = Color.white;
-            _btn = new GUIStyle(GUI.skin.button) { fontSize = fsm, fontStyle = FontStyle.Bold };
+            _btn = new GUIStyle(GUI.skin.button) { fontSize = fsm, fontStyle = FontStyle.Bold, richText = true };
             _box = new GUIStyle(); _box.normal.background = _bgTex;
+            OverlayFonts.Apply(_title, _label, _dim, _tiny, _col, _btn);
             _stylesReady = true;
         }
 

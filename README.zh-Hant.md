@@ -185,7 +185,14 @@ bash scripts/repair-crossover-macos.sh --repair --launch
 ```
 [General]
 Language = Auto   # 可改成 zh-Hant / zh-Hans / en / ja / es 強制語言
+
+[UI]
+FontFamily = Auto # 疊加面板字型 fallback；Auto 會優先嘗試 CJK 字型
+FontPath =        # 可指定 .ttf/.otf/.ttc，例如 C:\windows\Fonts\SourceHanSansTC-Regular.otf
 ```
+
+### CrossOver 字型疑難排解
+macOS/CrossOver 下如果面板和圖表有出現、但文字全部不可見，請把 **Asian Fonts Component** 安裝到執行 Steam/TBH 的同一個 bottle，然後完整停止並重啟該 bottle。若重啟後仍無字，可將 `UI.FontPath` 指到 CJK 字型檔，例如 `C:\windows\Fonts\SourceHanSansTC-Regular.otf`，或把字型放到 `<遊戲>\BepInEx\plugins\fonts\` 後指定該路徑。
 
 ## 移除
 刪掉遊戲資料夾裡的：`winhttp.dll`、`doorstop_config.ini`、`.doorstop_version`、

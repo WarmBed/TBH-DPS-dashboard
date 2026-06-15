@@ -124,6 +124,7 @@ namespace TbhDpsMeter
             _cell = new GUIStyle { fontSize = Mathf.Max(9, fsm - 1), richText = true, alignment = TextAnchor.MiddleRight }; _cell.normal.textColor = Color.white;
             _btn = new GUIStyle(GUI.skin.button) { fontSize = fsm, fontStyle = FontStyle.Bold, richText = true };
             _box = new GUIStyle(); _box.normal.background = _bgTex;
+            OverlayFonts.Apply(_title, _label, _dim, _tiny, _col, _cell, _btn);
             _stylesReady = true;
         }
 

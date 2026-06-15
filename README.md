@@ -208,7 +208,14 @@ File: `<game folder>\BepInEx\config\tbh.dpsmeter.cfg` (created after the first r
 ```
 [General]
 Language = Auto   # force a language: zh-Hant / zh-Hans / en / ja / es
+
+[UI]
+FontFamily = Auto # overlay font fallback; Auto tries CJK-capable fonts first
+FontPath =        # optional .ttf/.otf/.ttc path, e.g. C:\windows\Fonts\SourceHanSansTC-Regular.otf
 ```
+
+### CrossOver font troubleshooting
+On macOS/CrossOver, if overlay panels and charts render but all text is invisible, install **Asian Fonts Component** into the same bottle as Steam/TBH, then fully stop and restart that bottle. If text is still missing, set `UI.FontPath` to a CJK-capable font file such as `C:\windows\Fonts\SourceHanSansTC-Regular.otf`, or place a font under `<game>\BepInEx\plugins\fonts\` and point `UI.FontPath` at it.
 
 ## Uninstall
 Delete from the game folder: `winhttp.dll`, `doorstop_config.ini`, `.doorstop_version`,

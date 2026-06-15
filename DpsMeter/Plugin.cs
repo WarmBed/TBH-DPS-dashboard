@@ -31,6 +31,8 @@ namespace TbhDpsMeter
         public static ConfigEntry<bool> StartVisible;
         public static ConfigEntry<int> FontSize;        // primary/large text (titles, main numbers, list rows)
         public static ConfigEntry<int> FontSizeSmall;   // secondary/detail text (dim hints, axis labels, buttons)
+        public static ConfigEntry<string> FontFamily;   // optional IMGUI font family fallback (Auto = resolver list)
+        public static ConfigEntry<string> FontPath;     // optional IMGUI font file path (.ttf/.otf/.ttc)
         public static ConfigEntry<float> UIScale;
         public static ConfigEntry<bool> HideOnGameMenu;
         public static ConfigEntry<bool> BorderOn;        // panel border, toggled from the F1 control center
@@ -125,6 +127,9 @@ namespace TbhDpsMeter
             StartVisible = Config.Bind("UI", "StartVisible", true, "Show the overlay on launch.");
             FontSize = Config.Bind("UI", "FontSize", 15, "Primary/large font size: titles, main numbers, list rows. Adjust live from the F1 control center.");
             FontSizeSmall = Config.Bind("UI", "FontSizeSmall", 13, "Secondary/detail font size: dim hints, chart axis labels, buttons. Adjust live from the F1 control center.");
+            FontFamily = Config.Bind("UI", "FontFamily", "Auto", "Overlay font family. Auto tries CJK-capable fonts first; set to a specific installed family if needed.");
+            FontPath = Config.Bind("UI", "FontPath", "", "Optional overlay font file path (.ttf/.otf/.ttc). Relative paths are resolved under BepInEx/plugins and BepInEx/plugins/fonts.");
+            OverlayFonts.Init(FontFamily.Value, FontPath.Value, Logger);
             UIScale = Config.Bind("UI", "UIScale", 1.0f, "Global overlay scale (0.6–1.5). Panels auto-shrink further if they'd exceed the screen. Adjust live with Ctrl+PageUp/PageDown or the F1 control center's −/+ control.");
             HideOnGameMenu = Config.Bind("UI", "HideOnGameMenu", true, "Hide all overlays while a game menu (TAB) is open. Toggle live from the F1 control center.");
             BorderOn = Config.Bind("UI", "PanelBorder", false, "Draw a border around every overlay panel. Toggle live from the F1 control center.");

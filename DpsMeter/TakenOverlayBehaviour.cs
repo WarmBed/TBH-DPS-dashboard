@@ -214,17 +214,18 @@ namespace TbhDpsMeter
             _builtFs = fs; _builtFsm = fsm;
             _title = new GUIStyle { fontSize = fs, fontStyle = FontStyle.Bold, richText = true };
             _title.normal.textColor = new Color(1f, 0.55f, 0.45f);
-            _big = new GUIStyle { fontSize = fs + 9, fontStyle = FontStyle.Bold };
+            _big = new GUIStyle { fontSize = fs + 9, fontStyle = FontStyle.Bold, richText = true };
             _big.normal.textColor = Color.white;
-            _label = new GUIStyle { fontSize = fs };
+            _label = new GUIStyle { fontSize = fs, richText = true };
             _label.normal.textColor = new Color(0.93f, 0.93f, 0.93f);
-            _dim = new GUIStyle { fontSize = fsm };
+            _dim = new GUIStyle { fontSize = fsm, richText = true };
             _dim.normal.textColor = new Color(0.95f, 0.84f, 0.78f);
-            _tiny = new GUIStyle { fontSize = Mathf.Max(9, fsm - 2) };
+            _tiny = new GUIStyle { fontSize = Mathf.Max(9, fsm - 2), richText = true };
             _tiny.normal.textColor = new Color(0.85f, 0.75f, 0.7f);
-            _btn = new GUIStyle(GUI.skin.button) { fontSize = fsm, fontStyle = FontStyle.Bold };
+            _btn = new GUIStyle(GUI.skin.button) { fontSize = fsm, fontStyle = FontStyle.Bold, richText = true };
             _box = new GUIStyle();
             _box.normal.background = _bgTex;
+            OverlayFonts.Apply(_title, _big, _label, _dim, _tiny, _btn);
             _stylesReady = true;
         }
 

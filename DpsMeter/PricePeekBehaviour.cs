@@ -97,6 +97,7 @@ namespace TbhDpsMeter
             _tiny = new GUIStyle { fontSize = Mathf.Max(9, fsm - 2), richText = true }; _tiny.normal.textColor = new Color(0.62f, 0.68f, 0.78f);
             _tinyR = new GUIStyle(_tiny) { alignment = TextAnchor.UpperRight };   // right-aligned qty in the order book
             _box = new GUIStyle(); _box.normal.background = _bgTex;
+            OverlayFonts.Apply(_title, _label, _dim, _tiny, _tinyR);
             _stylesReady = true;
         }
 

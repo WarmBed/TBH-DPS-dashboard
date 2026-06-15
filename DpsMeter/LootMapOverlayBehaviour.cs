@@ -114,6 +114,7 @@ namespace TbhDpsMeter
             _tip = new GUIStyle { fontSize = fsm, richText = true, alignment = TextAnchor.MiddleCenter }; _tip.normal.textColor = new Color(0.95f, 0.95f, 0.95f);
             _tipMulti = new GUIStyle { fontSize = fsm, richText = true, wordWrap = false, alignment = TextAnchor.UpperLeft }; _tipMulti.normal.textColor = new Color(0.95f, 0.95f, 0.95f);
             _box = new GUIStyle(); _box.normal.background = _bgTex;
+            OverlayFonts.Apply(_title, _label, _dim, _tiny, _btn, _tip, _tipMulti);
             _stylesReady = true;
         }
 
