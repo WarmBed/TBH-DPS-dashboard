@@ -162,6 +162,7 @@ namespace TbhDpsMeter
                             // item can't be fetched by save uid) — read them from the bundled wiki meta table.
                             g.Grade = ItemMetaStore.Grade(g.ItemKey);
                             g.Level = ItemMetaStore.Level(g.ItemKey);
+                            g.GearType = ItemMetaStore.GearType(g.ItemKey);
                             snap.Equipment.Add(g);
                         }
                     }

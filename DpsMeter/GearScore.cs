@@ -81,23 +81,44 @@ namespace TbhDpsMeter
             public readonly List<Part> Parts = new List<Part>();
         }
 
+        // Defensive gear slots (their base value -> defence); accessories split 50/50; everything else
+        // (weapons + off-hand foci/ammo) -> attack.
+        private static readonly HashSet<string> DefGear = new HashSet<string>
+        { "SHIELD", "HELMET", "ARMOR", "GLOVES", "BOOTS" };
+        private static readonly HashSet<string> AccGear = new HashSet<string>
+        { "AMULET", "EARING", "EARRING", "RING", "BRACER" };
+
         public static ItemScore ScoreItem(GearItem g)
         {
             var s = new ItemScore();
             if (g == null) return s;
+            // base value (grade + level + socket counts) is item-quality, not a specific stat — bucket it by
+            // gear slot: armor -> defence, accessory -> split, weapon/off-hand -> attack.
+            double baseVal = 0;
             double gb = GradePoints(g.Grade);
-            s.Parts.Add(new Part("grade", gb)); s.Total += gb;
+            s.Parts.Add(new Part("grade", gb)); s.Total += gb; baseVal += gb;
             double lv = g.Level * LevelWeight;
-            if (lv != 0) { s.Parts.Add(new Part("level", lv)); s.Total += lv; }
-            foreach (var a in g.Affixes) Add(s, a.Name, a.Value * WeightOf(a.Name), a.Name);
-            // live per-gem socket stats (rare); usually empty — socket value comes from the counts below.
-            foreach (var a in g.Sockets) Add(s, "socket:" + a.Name, a.Value * WeightOf(a.Name), a.Name);
+            if (lv != 0) { s.Parts.Add(new Part("level", lv)); s.Total += lv; baseVal += lv; }
             int sockets = g.DecoCount + g.EngraveCount + g.InscribeCount;
-            if (sockets != 0) { double p = sockets * SocketWeight; s.Parts.Add(new Part("sockets", p)); s.Total += p; }
+            if (sockets != 0) { double p = sockets * SocketWeight; s.Parts.Add(new Part("sockets", p)); s.Total += p; baseVal += p; }
+            BucketBase(s, baseVal, g.GearType);
+            // affixes bucket individually by their stat type
+            foreach (var a in g.Affixes) Add(s, a.Name, a.Value * WeightOf(a.Name), a.Name);
+            // live per-gem socket stats (rare); usually empty — socket value comes from the counts above.
+            foreach (var a in g.Sockets) Add(s, "socket:" + a.Name, a.Value * WeightOf(a.Name), a.Name);
             return s;
         }
 
-        // add a scored line, bucketing its points into Attack/Defense (general stays in Total only).
+        // bucket an item's base value into attack/defence by its gear slot.
+        private static void BucketBase(ItemScore s, double baseVal, string gearType)
+        {
+            string t = (gearType ?? "").ToUpperInvariant();
+            if (DefGear.Contains(t)) s.Defense += baseVal;
+            else if (AccGear.Contains(t)) { s.Attack += baseVal * 0.5; s.Defense += baseVal * 0.5; }
+            else s.Attack += baseVal;   // weapons + off-hand foci/ammo (and unknown) -> attack
+        }
+
+        // add a scored affix line, bucketing its points into Attack/Defense by stat type.
         private static void Add(ItemScore s, string label, double pts, string statForBucket)
         {
             s.Parts.Add(new Part(label, pts)); s.Total += pts;

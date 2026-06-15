@@ -43,5 +43,9 @@ namespace TbhDpsMeter
 
         /// <summary>Icon path relative to the wiki's /game/gear/ root (e.g. "bow/BOW_310017.png"); "" if unknown.</summary>
         public static string IconPath(int itemKey) => Json.Str(Json.Get(Entry(itemKey), "i")) ?? "";
+
+        /// <summary>Gear slot/type (e.g. "BOW", "HELMET", "RING"); "" if unknown. Used to bucket the item's
+        /// base value into the attack/defence split.</summary>
+        public static string GearType(int itemKey) => Json.Str(Json.Get(Entry(itemKey), "t")) ?? "";
     }
 }

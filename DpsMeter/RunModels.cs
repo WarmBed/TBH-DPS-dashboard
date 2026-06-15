@@ -38,6 +38,9 @@ namespace TbhDpsMeter
         public string Grade = "";
         /// <summary>Required/item level (the "需要等級" number). 0 = unknown -> contributes no level points.</summary>
         public int Level;
+        /// <summary>Gear slot/type (e.g. "BOW"/"HELMET"/"RING") from the meta table; buckets the item's base
+        /// value into attack vs defence. "" = unknown (treated as neutral).</summary>
+        public string GearType = "";
         public readonly List<Affix> Affixes = new List<Affix>();
         /// <summary>Contents of the 裝飾/雕刻/銘文 sockets, each as a stat+value (live path; usually empty).</summary>
         public readonly List<Affix> Sockets = new List<Affix>();
