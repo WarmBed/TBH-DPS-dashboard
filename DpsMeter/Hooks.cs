@@ -84,8 +84,9 @@ namespace TbhDpsMeter
                 if (amount <= 0f) return;
                 bool crit = a.IsCritical;
                 int type = (int)a.DamageType;
+                int ck = HeroProbe.ReadHeroKeyOf(attacker);   // which hero dealt it (0 = unknown)
 
-                Plugin.Tracker.Record(amount, crit, type, Time.time);
+                Plugin.Tracker.Record(amount, crit, type, Time.time, ck);
                 if (Plugin.DebugDamage != null && Plugin.DebugDamage.Value)
                     Plugin.LogDamageSample(amount, crit, type);
             }

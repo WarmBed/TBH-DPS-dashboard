@@ -166,6 +166,7 @@ namespace TbhDpsMeter
             { "mode_detailed",  new[] { "詳細", "Detailed", "詳細", "详细", "Detalle" } },
             { "grade",          new[] { "稀有度", "Rarity", "レア度", "稀有度", "Rareza" } },
             { "level",          new[] { "等級", "Level", "レベル", "等级", "Nivel" } },
+            { "by_character",   new[] { "按角色", "By character", "キャラ別", "按角色", "Por personaje" } },
             { "sockets",        new[] { "鑲嵌槽", "Sockets", "ソケット", "镶嵌槽", "Engastes" } },
             // gear affix / stat names (shown in the gear-score detail + compare panels)
             { "AoE",            new[] { "範圍", "AoE", "範囲", "范围", "Área" } },

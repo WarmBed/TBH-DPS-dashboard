@@ -837,12 +837,47 @@ namespace TbhDpsMeter
             catch { return 0; }
         }
 
+        /// <summary>Hero key for the dealing/attacking unit (a Hero at runtime), read from its cache's
+        /// EEquipClassType — same by-type resolution as <see cref="ReadClass"/>, so it survives obfuscation.
+        /// Reflection runs on the runtime type, so a statically-typed Unit still works. 0 = unknown.
+        /// Used by the damage hook to attribute each hit to a character.</summary>
+        public static int ReadHeroKeyOf(object unit)
+        {
+            try
+            {
+                if (unit == null) return 0;
+                var cache = Refl.Get(unit, "cache");
+                if (cache == null) return 0;
+                if (!_classResolved)
+                {
+                    _classResolved = true;
+                    foreach (var p in cache.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                        if (p.CanRead && p.GetIndexParameters().Length == 0 && p.PropertyType.Name == "EEquipClassType") { _classProp = p; break; }
+                    Plugin.Logger?.LogInfo("[selfcheck] attacker cache class property -> " + (_classProp != null ? _classProp.Name : "MISSING"));
+                }
+                if (_classProp == null) return 0;
+                int cls = Convert.ToInt32(_classProp.GetValue(cache));
+                return cls > 0 ? cls * 100 + 1 : 0;
+            }
+            catch { return 0; }
+        }
+
         /// <summary>Hero key derived from class: keys are class*100+1 (Knight1→101, Ranger2→201,
         /// Sorcerer3→301, Priest4→401, …). Robust to obfuscation; the save is keyed by this. 0 = unknown.</summary>
         public static int ReadHeroKey(Hero hero)
         {
             int cls = ReadClass(hero);
             return cls > 0 ? cls * 100 + 1 : 0;
+        }
+
+        /// <summary>Localized hero display name for a hero key (HeroName_&lt;key&gt;), following the in-game
+        /// language; falls back to the key string. Used by the DPS panel's per-character breakdown.</summary>
+        public static string HeroName(int heroKey)
+        {
+            if (heroKey <= 0) return "?";
+            string key = "HeroName_" + heroKey;
+            string n = GameLoc(key);
+            return (!string.IsNullOrEmpty(n) && n != key) ? n : heroKey.ToString();
         }
 
         public static void ReadIdentity(Hero hero, CharacterSnapshot snap)

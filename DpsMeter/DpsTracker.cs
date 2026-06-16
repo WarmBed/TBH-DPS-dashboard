@@ -24,7 +24,9 @@ namespace TbhDpsMeter
         };
 
         private readonly float _windowSeconds;
-        private readonly Queue<(float t, float dmg)> _window = new Queue<(float, float)>();
+        // each windowed event carries the dealing character's key (ck) for per-character live DPS.
+        private readonly Queue<(float t, float dmg, int ck)> _window = new Queue<(float, float, int)>();
+        private readonly Dictionary<int, double> _byChar = new Dictionary<int, double>();
 
         private float _startTime;
         private float _lastDamageTime;
@@ -52,6 +54,7 @@ namespace TbhDpsMeter
         {
             _window.Clear();
             _byType.Clear();
+            _byChar.Clear();
             _startTime = now;
             _lastDamageTime = now;
             _active = true;
@@ -65,8 +68,9 @@ namespace TbhDpsMeter
         /// <summary>Stop accumulating but keep the numbers for display.</summary>
         public void EndEncounter() => _active = false;
 
-        /// <summary>Record one damage instance dealt by the player side.</summary>
-        public void Record(float amount, bool isCritical, int damageTypeFlag, float now)
+        /// <summary>Record one damage instance dealt by the player side. <paramref name="charKey"/> is the
+        /// dealing hero's key (0 = unknown), used for the per-character breakdown.</summary>
+        public void Record(float amount, bool isCritical, int damageTypeFlag, float now, int charKey = 0)
         {
             if (amount <= 0) return;
             if (!_active)
@@ -82,8 +86,11 @@ namespace TbhDpsMeter
             if (_byType.TryGetValue(damageTypeFlag, out var cur)) _byType[damageTypeFlag] = cur + amount;
             else _byType[damageTypeFlag] = amount;
 
+            if (_byChar.TryGetValue(charKey, out var cc)) _byChar[charKey] = cc + amount;
+            else _byChar[charKey] = amount;
+
             _lastDamageTime = now;
-            _window.Enqueue((now, amount));
+            _window.Enqueue((now, amount, charKey));
             Trim(now);
 
             float live = LiveDps(now);
@@ -133,6 +140,32 @@ namespace TbhDpsMeter
                 parts.Sort((x, y) => y.Amount.CompareTo(x.Amount)); // largest share first
             }
 
+            // per-character rollup: total + share, plus live DPS from the windowed events (same divisor as LiveDps).
+            var chars = new List<CharPart>();
+            if (_total > 0 && _byChar.Count > 0)
+            {
+                Trim(now);
+                var winByChar = new Dictionary<int, double>();
+                foreach (var e in _window)
+                    winByChar[e.ck] = (winByChar.TryGetValue(e.ck, out var w) ? w : 0) + e.dmg;
+                float elapsed = now - _startTime;
+                float divisor = elapsed < _windowSeconds ? elapsed : _windowSeconds;
+                if (divisor < 1f) divisor = 1f;
+                foreach (var kv in _byChar)
+                {
+                    if (kv.Value <= 0) continue;
+                    winByChar.TryGetValue(kv.Key, out var win);
+                    chars.Add(new CharPart
+                    {
+                        CharKey = kv.Key,
+                        Amount = kv.Value,
+                        Share = (float)(kv.Value / _total),
+                        Dps = (float)(win / divisor),
+                    });
+                }
+                chars.Sort((x, y) => y.Amount.CompareTo(x.Amount));
+            }
+
             return new Snapshot
             {
                 Active = _active,
@@ -145,6 +178,7 @@ namespace TbhDpsMeter
                 CritRate = _hits > 0 ? (float)_crits / _hits : 0f,
                 CritDamageShare = _total > 0 ? (float)(_critDamage / _total) : 0f,
                 ByType = parts,
+                ByChar = chars,
             };
         }
 
@@ -175,6 +209,15 @@ namespace TbhDpsMeter
             public float Share;
         }
 
+        /// <summary>Per-character damage rollup: total, share of run, and live (windowed) DPS.</summary>
+        public struct CharPart
+        {
+            public int CharKey;
+            public double Amount;
+            public float Share;
+            public float Dps;
+        }
+
         public struct Snapshot
         {
             public bool Active;
@@ -187,6 +230,7 @@ namespace TbhDpsMeter
             public float CritRate;
             public float CritDamageShare;
             public List<TypePart> ByType;
+            public List<CharPart> ByChar;
         }
     }
 }

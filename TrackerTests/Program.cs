@@ -207,6 +207,22 @@ class Tests
         BoxOpenStore.Load(empty);
         Check("boxopenstore clear empties", empty.Total() == 0, empty.Total());
 
+        // --- DPS per-character rollup ---
+        var tc = new DpsTracker(windowSeconds: 5f);
+        tc.StartEncounter(0f);
+        tc.Record(300, false, 1, 0f, 101);   // Knight deals 300
+        tc.Record(100, false, 2, 1f, 201);   // Ranger deals 100
+        var sc = tc.GetSnapshot(2f);
+        Check("bychar count = 2", sc.ByChar.Count == 2, sc.ByChar.Count);
+        Check("bychar[0] = 101 (largest)", sc.ByChar[0].CharKey == 101, sc.ByChar[0].CharKey);
+        Check("bychar[0] share = 0.75", Near(sc.ByChar[0].Share, 0.75), sc.ByChar[0].Share);
+        Check("bychar[1] = 201 share 0.25", sc.ByChar[1].CharKey == 201 && Near(sc.ByChar[1].Share, 0.25), sc.ByChar[1].Share);
+        // per-char DPS sums to the overall live DPS (same window/divisor)
+        Check("bychar dps sums to live", Near(sc.ByChar[0].Dps + sc.ByChar[1].Dps, sc.LiveDps), sc.ByChar[0].Dps + sc.ByChar[1].Dps);
+        // single character -> one entry
+        var tc1 = new DpsTracker(); tc1.StartEncounter(0f); tc1.Record(500, false, 1, 0f, 301);
+        Check("bychar solo count = 1", tc1.GetSnapshot(1f).ByChar.Count == 1, tc1.GetSnapshot(1f).ByChar.Count);
+
         // --- GearScore ---
         var giLegendary = new GearItem { Grade = "LEGENDARY", Level = 80 };
         giLegendary.Affixes.Add(new Affix("attack", 100));      // 100*1

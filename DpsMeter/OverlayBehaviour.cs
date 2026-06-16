@@ -35,7 +35,8 @@ namespace TbhDpsMeter
         private float _wantX, _wantY;   // intended position; clamped non-destructively so window resizes don't move the panel
 
         // clickable regions (set during OnGUI, hit-tested in Update via InputCompat)
-        private Rect _resetRect, _prevRect, _nextRect, _handleRect, _updRect;
+        private Rect _resetRect, _prevRect, _nextRect, _handleRect, _updRect, _modeRect;
+        private bool _detailed;   // simple/detailed toggle: detailed adds the per-character breakdown
         private float _scale = 1f;
         private readonly PanelResize _resize = new PanelResize();
 
@@ -187,6 +188,7 @@ namespace TbhDpsMeter
 
             if (InputCompat.MousePressed())
             {
+                if (_modeRect.Contains(m)) { _detailed = !_detailed; return; }
                 if (_resetRect.Contains(m)) { ResetMeter(); return; }
                 if (_updRect.Contains(m) && Updater.State == Updater.St.Available) { Updater.DownloadAsync(); return; }
                 if (_prevRect.Contains(m)) { NavOlder(); return; }
@@ -450,6 +452,7 @@ namespace TbhDpsMeter
 
                 string title; float headline, peak, avg, crit, critShare, dur; double total; int waves;
                 List<DpsTracker.TypePart> parts; List<Sample> samples;
+                List<DpsTracker.CharPart> byChar = null;   // live-only per-character breakdown
 
                 if (reviewing)
                 {
@@ -467,7 +470,7 @@ namespace TbhDpsMeter
                     title = $"{dot} {Loc.G("dps_title")}  <size=11>{Loc.G("wave_short")}{_currentWave}</size>";
                     headline = s.LiveDps; peak = s.PeakDps; avg = s.AvgDps; crit = s.CritRate; critShare = s.CritDamageShare;
                     dur = s.DurationSeconds; total = s.Total; waves = _currentWave;
-                    parts = s.ByType; samples = _history;
+                    parts = s.ByType; samples = _history; byChar = s.ByChar;
                 }
 
                 // ---- layout / sizing ----
@@ -476,10 +479,13 @@ namespace TbhDpsMeter
                 int legendRows = Mathf.CeilToInt(Mathf.Min(parts.Count, 6) / 2f);
                 bool showUpd = Updater.State == Updater.St.Available || Updater.State == Updater.St.Downloading
                     || Updater.State == Updater.St.Downloaded || Updater.State == Updater.St.Error;
+                bool showChars = _detailed && !reviewing && byChar != null && byChar.Count > 1;
                 float height = Pad + lh /*header*/ + (showUpd ? lh : 0) /*update banner*/ + lh /*nav*/ + (fs + 12) /*big*/
                     + lh + lh /*peak/avg,total/dur*/ + lh /*crit*/
                     + 6 + graphH + 14 /*graph + x labels*/ + 6 + barH
-                    + (legendRows > 0 ? lh * legendRows : 0) + Pad;
+                    + (legendRows > 0 ? lh * legendRows : 0)
+                    + (showChars ? lh * 0.4f + lh + lh * byChar.Count : 0)
+                    + Pad;
                 _rect.height = height;
                 _scale = UiScale.Fit(_rect.width, _rect.height);
                 // keep the panel on-screen, but clamp from the INTENDED position (not the live one) so a
@@ -498,7 +504,9 @@ namespace TbhDpsMeter
                 _handleRect = new Rect(x, _rect.y, w - 64, lh + Pad);
                 _resetRect = new Rect(x + w - 56, cy - 1, 50, lh + 2);
                 GUI.Button(_resetRect, Loc.G("reset"), _btn);
-                GUI.Label(new Rect(ix, cy, Mathf.Max(40f, _resetRect.x - ix - 4), lh), title, _title);
+                _modeRect = new Rect(_resetRect.x - 4 - 50, cy - 1, 50, lh + 2);
+                GUI.Button(_modeRect, Loc.G(_detailed ? "mode_detailed" : "mode_simple"), _btn);
+                GUI.Label(new Rect(ix, cy, Mathf.Max(40f, _modeRect.x - ix - 4), lh), title, _title);
                 cy += lh;
 
                 // update banner (auto-check). [download] button hit-tested in HandlePointer.
@@ -543,7 +551,8 @@ namespace TbhDpsMeter
                 cy += graphH + 14;
 
                 cy += 0;
-                DrawDistribution(ix, cy, iw, barH, parts, total, lh);
+                cy = DrawDistribution(ix, cy, iw, barH, parts, total, lh);
+                if (showChars) DrawByCharacter(ix, cy, iw, lh, byChar);
                 _resize.DrawGrip(_white, _rect);
             }
             catch { }
@@ -614,10 +623,11 @@ namespace TbhDpsMeter
             }
         }
 
-        private void DrawDistribution(float x, float y, float w, float h, List<DpsTracker.TypePart> parts, double total, float lh)
+        /// <summary>Draw the damage-type bar + legend; returns the y just below the legend.</summary>
+        private float DrawDistribution(float x, float y, float w, float h, List<DpsTracker.TypePart> parts, double total, float lh)
         {
             DrawRect(x, y, w, h, new Color(0f, 0f, 0f, 1f));
-            if (parts == null || parts.Count == 0 || total <= 0) return;
+            if (parts == null || parts.Count == 0 || total <= 0) return y + h;
 
             float cx = x;
             foreach (var p in parts) { float segW = p.Share * w; DrawRect(cx, y, segW, h, ColorForFlag(p.Flag)); cx += segW; }
@@ -633,6 +643,43 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(lx + 14, ly, colW - 14, lh), $"{Loc.Name(p.Name)} {p.Share * 100f:0.#}%", _dim);
                 shown++; col++;
                 if (col >= 2) { col = 0; ly += lh; }
+            }
+            if (col != 0) ly += lh;   // close the last partial legend row
+            return ly;
+        }
+
+        /// <summary>Detailed-mode per-character breakdown: class-coloured name + DPS + total + share,
+        /// largest contributor first. Shown only with 2+ characters (caller guards solo).</summary>
+        private void DrawByCharacter(float x, float y, float w, float lh, List<DpsTracker.CharPart> byChar)
+        {
+            float cy = y + lh * 0.4f;
+            GUI.Label(new Rect(x, cy, w, lh), $"<color=#9fb4cc>{Loc.G("by_character")}</color>", _dim);
+            cy += lh;
+            float dpsW = 70f, totW = 64f, shareW = 48f;
+            float nameW = w - dpsW - totW - shareW;
+            foreach (var c in byChar)
+            {
+                string nm = HeroProbe.HeroName(c.CharKey);
+                DrawRect(x, cy + lh * 0.32f, 9, 9, ClassColor(c.CharKey));
+                GUI.Label(new Rect(x + 13, cy, nameW - 13, lh), nm, _label);
+                GUI.Label(new Rect(x + nameW, cy, dpsW, lh), $"<color=#dfe4ec>{Fmt(c.Dps)}</color>", _label);
+                GUI.Label(new Rect(x + nameW + dpsW, cy, totW, lh), $"<color=#9fb4cc>{Fmt(c.Amount)}</color>", _dim);
+                GUI.Label(new Rect(x + nameW + dpsW + totW, cy, shareW, lh), $"<color=#aeb6c2>{c.Share * 100f:0.#}%</color>", _dim);
+                cy += lh;
+            }
+        }
+
+        // hero-class colour by class id (heroKey/100): Knight/Ranger/Sorcerer/Priest/…  Unknown -> grey.
+        private static Color ClassColor(int heroKey)
+        {
+            switch (heroKey / 100)
+            {
+                case 1: return new Color(0.90f, 0.78f, 0.35f);  // Knight — gold
+                case 2: return new Color(0.40f, 0.86f, 0.46f);  // Ranger — green
+                case 3: return new Color(0.55f, 0.60f, 0.97f);  // Sorcerer — blue-violet
+                case 4: return new Color(0.95f, 0.62f, 0.40f);  // Priest — orange
+                case 5: return new Color(0.85f, 0.45f, 0.85f);  // (extra class) — magenta
+                default: return new Color(0.7f, 0.74f, 0.8f);
             }
         }
 
