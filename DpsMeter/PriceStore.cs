@@ -28,9 +28,15 @@ namespace TbhDpsMeter
             public int MedianCents = -1; // median sale price in cents (-1 = unknown)
         }
 
-        // hash_name -> Info. Case-insensitive.
-        private static readonly Dictionary<string, Info> _items =
+        // hash_name -> Info. Case-insensitive. Swapped atomically on refresh (readers keep the old map
+        // until the new one is fully built), so a hovered item never blinks to "no price" mid-reload.
+        private static volatile Dictionary<string, Info> _items =
             new Dictionary<string, Info>(StringComparer.OrdinalIgnoreCase);
+
+        // The cron rebuilds prices.json every 30 min; re-fetch on that cadence so a long-running game
+        // picks up newly-listed items (e.g. a freshly tradable Soulstone) without needing a restart.
+        private static long _lastAttemptMs;
+        private const long RefreshMs = 30 * 60 * 1000;
 
         // raw.githubusercontent refreshes within ~minutes (the cron relies on it too); jsDelivr's branch
         // cache lags our 30-min updates badly, so it's only the fallback if raw is unreachable.
@@ -41,7 +47,11 @@ namespace TbhDpsMeter
         /// <summary>Kick off the one-time async fetch. Safe to call every frame.</summary>
         public static void EnsureLoaded()
         {
-            if (State != St.Idle) return;
+            long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            if (State == St.Loading) return;
+            // first load when Idle; otherwise re-fetch only once the feed is ~30 min stale
+            if (State != St.Idle && now - _lastAttemptMs < RefreshMs) return;
+            _lastAttemptMs = now;
             State = St.Loading;
             Task.Run(async () =>
             {
@@ -57,6 +67,8 @@ namespace TbhDpsMeter
                         Currency = Json.Str(Json.Get(o, "currency")) ?? "$";
                         CachedAtMs = Json.Long(Json.Get(o, "cachedAt"));
                         var items = Json.Obj(Json.Get(o, "items"));
+                        // build into a fresh map and swap in at the end (don't mutate the live one)
+                        var fresh = new Dictionary<string, Info>(StringComparer.OrdinalIgnoreCase);
                         int n = 0;
                         if (items != null)
                             foreach (var kv in items)
@@ -85,14 +97,16 @@ namespace TbhDpsMeter
                                     }
                                     if (cs.Count > 0) { info.HistC = cs.ToArray(); if (ts.Count == cs.Count) info.HistT = ts.ToArray(); }
                                 }
-                                _items[kv.Key] = info;
+                                fresh[kv.Key] = info;
                                 n++;
                             }
+                        if (n > 0) _items = fresh;   // atomic swap; keep the old map if the feed came back empty
                         State = St.Ready;
                         Plugin.Logger?.LogInfo($"[prices] loaded {n} items, currency='{Currency}'");
                     }
                 }
-                catch (Exception e) { State = St.Error; Plugin.Logger?.LogWarning("[prices] load failed: " + e.Message); }
+                // on failure keep serving whatever we already had; only flag Error if we never loaded once
+                catch (Exception e) { State = _items.Count > 0 ? St.Ready : St.Error; Plugin.Logger?.LogWarning("[prices] load failed: " + e.Message); }
             });
         }
 

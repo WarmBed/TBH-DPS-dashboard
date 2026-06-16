@@ -28,6 +28,7 @@ namespace TbhDpsMeter
         private bool _dragging; private Vector2 _dragOffset;
         private int _pinnedKey;            // 0 = not pinned; otherwise the box is locked to this item
         private string _pinnedLocalized, _pinnedSteamName;
+        private static string _lastMissLog;   // diag: log each distinct unpriced steam-name once
 
         private Rect ScaledRect() => new Rect(_rect.x, _rect.y, _rect.width * _scale, _rect.height * _scale);
         private bool Enabled => Plugin.PricePeekEnabled == null || Plugin.PricePeekEnabled.Value;
@@ -128,6 +129,11 @@ namespace TbhDpsMeter
                 else { localized = Loc.G("price_panel"); steamName = ""; }   // adjust-mode placeholder
 
                 bool haveQuote = info != null;
+                if (!haveQuote && key != 0 && !string.IsNullOrEmpty(steamName) && steamName != _lastMissLog)
+                {
+                    _lastMissLog = steamName;
+                    Plugin.Logger?.LogInfo($"[price] MISS key={key} en='{ItemNameStore.GetEn(key)}' grade='{HeroProbe.HoveredGrade}' gear={HeroProbe.HoveredIsGear} -> steam='{steamName}'");
+                }
                 int[] hist = info?.HistC;
                 bool hasChart = hist != null && hist.Length >= 2;
                 // pinned -> the full single-item card: fetch this item's order book (Steam's is login-gated,

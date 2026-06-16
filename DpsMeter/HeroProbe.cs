@@ -677,14 +677,25 @@ namespace TbhDpsMeter
             if (item == null) return 0;
             try
             {
-                if (_itemKeyProp != null) return Refl.ToI(_itemKeyProp.GetValue(item));
+                // Trust the cached prop only while its value is still a real item key — different items can
+                // carry their key in a different int member, so a prop locked from item A may read a non-key
+                // value for item B. On miss, re-scan for THIS item without disturbing the cache.
+                if (_itemKeyProp != null)
+                {
+                    int cv = Refl.ToI(_itemKeyProp.GetValue(item));
+                    if (cv > 0 && !string.IsNullOrEmpty(ItemNameStore.Get(cv))) return cv;
+                }
                 foreach (var p in item.GetType().GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
                 {
                     if (!p.CanRead || p.GetIndexParameters().Length != 0) continue;
                     string tn = p.PropertyType.Name;
                     if (tn != "Int32" && tn != "ObscuredInt") continue;
                     int v = Refl.ToI(p.GetValue(item));
-                    if (v > 0 && !string.IsNullOrEmpty(ItemNameStore.Get(v))) { _itemKeyProp = p; Plugin.Logger?.LogInfo("[price] item key prop -> " + p.Name + " (" + v + ")"); return v; }
+                    if (v > 0 && !string.IsNullOrEmpty(ItemNameStore.Get(v)))
+                    {
+                        if (_itemKeyProp == null) { _itemKeyProp = p; Plugin.Logger?.LogInfo("[price] item key prop -> " + p.Name + " (" + v + ")"); }
+                        return v;
+                    }
                 }
             }
             catch { }
