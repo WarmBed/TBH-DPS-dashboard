@@ -17,20 +17,27 @@ async function page(start) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const items = {};
-let start = 0, total = Infinity, currency = '', guard = 0;
-while (start < total && guard++ < 40) {
-  let j = null;
-  // Steam throttles unauthenticated bursts: a short/empty page is usually rate-limiting, not the end.
-  for (let attempt = 0; attempt < 4; attempt++) {
+let start = 0, maxTotal = 0, currency = '', guard = 0;
+// Steam's total_count is FLAKY (the same query returns 151 one call, 112 the next) and unauthenticated
+// bursts get rate-limited with short/empty pages. So: (1) never trust a single total_count as the stop
+// bound — page until a page is CONFIRMED empty after retries; (2) retry empty/short pages a few times
+// before accepting them as the end; (3) track the MAX total_count seen for a completeness check.
+while (guard++ < 80) {
+  let j = null, results = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
     try { j = await page(start); } catch { j = null; }
-    if (j && j.success === true && (j.results?.length || (j.total_count ?? 0) === 0)) break;
-    await sleep(3000 * (attempt + 1));   // back off and retry the same start
-    j = null;
+    if (j && j.success === true && Array.isArray(j.results)) {
+      results = j.results;
+      // accept a non-empty page immediately; accept an empty one only after a few confirming retries
+      if (results.length > 0 || attempt >= 3) break;
+    }
+    await sleep(4000 * (attempt + 1) + Math.floor(Math.random() * 1500));   // back off + jitter, retry same start
+    j = null; results = null;
   }
-  if (!j) throw new Error(`steam kept failing at start=${start} (got ${Object.keys(items).length}/${total})`);
-  total = j.total_count ?? total;
-  const results = j.results ?? [];
-  if (results.length === 0) break;       // genuinely no more
+  if (!j) throw new Error(`steam kept failing at start=${start} (got ${Object.keys(items).length})`);
+  if (typeof j.total_count === 'number' && j.total_count > 0) maxTotal = Math.max(maxTotal, j.total_count);
+  results = results || [];
+  if (results.length === 0) break;       // confirmed empty after retries -> genuine end of listings
   for (const r of results) {
     const name = r.hash_name || r.name;
     if (!name) continue;
@@ -44,8 +51,15 @@ while (start < total && guard++ < 40) {
     };
   }
   start += results.length;               // advance by what we actually got, not a fixed page size
-  if (start < total) await sleep(2000);  // be gentle to Steam between pages
+  await sleep(2500 + Math.floor(Math.random() * 1500));  // be gentle to Steam between pages
 }
+// Steam's total_count is inflated (counts delisted / 0-listing entries), so search only ever returns a
+// smaller set of real hash_names — reaching total_count is impossible and is NOT the completeness signal.
+// The real signal is the confirmed-empty page above. Guard only against a clearly-truncated run (hard
+// rate-limit) by refusing to ship a near-empty feed.
+const gotCount = Object.keys(items).length;
+console.log(`[prices] fetched ${gotCount} unique items (steam total_count reported up to ${maxTotal})`);
+if (gotCount < 50) { console.error(`[prices] ABORT: only ${gotCount} items — Steam rate-limited the run; keeping the previous feed.`); process.exit(1); }
 
 // ---- price history (item-major). Each item keeps a rolling [[tMs, cents], ...] series in history.json,
 // read back each run from raw.githubusercontent (the data branch is force-pushed as a single orphan
