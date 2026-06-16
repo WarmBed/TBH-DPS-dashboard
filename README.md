@@ -3,8 +3,8 @@
 **English** · [日本語](README.ja.md) · [繁體中文](README.zh-Hant.md) · [简体中文](README.zh-Hans.md)
 
 In-game overlay for **TaskBarHero** (TBH: Task Bar Hero) — **DPS · damage-taken · stage-compare ·
-farming-planner · box-log · opened-box stats · loot-heatmap · Steam-market price-peek**, all toggled
-from an **F1 control center**.
+gear-score · farming-planner · box-log · opened-box stats · loot-heatmap · Steam-market price-peek**,
+all toggled from an **F1 control center**.
 Built as a BepInEx 6 IL2CPP plugin. Tested on game **v1.00.09** (Unity 6 / IL2CPP).
 UI auto-detects **English / 日本語 / 繁體中文 / 简体中文 / Español**.
 
@@ -56,6 +56,21 @@ Stage / character / skill / item names follow the **in-game language** — set t
 <img src="image/TaskBarHero_5BRF6aiQF5.png" alt="Stage-compare panel" width="420">
 
 > *Clear-time trend on top (click a point to inspect that run); below, **baseline ∣ this run** in aligned columns with green/red deltas, plus the character's gear & skills.*
+
+## Gear Score (F7)
+Press **F7** for the **gear-score panel** — a WoW-style power rating for your whole party at a glance.
+Each item is scored from its **rarity + item level + affixes + applied sockets**, rolled up per character
+into a **total** with an **⚔ attack / ⛨ defence split**. Every row shows the item **icon**, a
+**rarity-coloured** name (TBH's 10-tier ladder: Common → … → Immortal → Cosmic), its level, applied-socket
+pips (◆) and its score. Toggle **Detailed** to expand each item into its per-effect point breakdown.
+
+Gear is read from your save (affixes & sockets); rarity, item level and icons are resolved from a bundled
+wiki table keyed by item — so it works **offline** and survives game updates. Affix names follow the
+in-game language.
+
+<img src="image/裝備評分.png" alt="Gear-score panel" width="300">
+
+> *Per-character total + attack/defence split; each item rarity-coloured with icon, level, sockets and score. Detailed mode breaks every item into its scoring parts.*
 
 ## Farming Planner (F6)
 Press **F6** for a **personalized** "what should I farm?" ranking of every stage — **gold/sec** and
@@ -144,9 +159,10 @@ to it for the text itself, saved as `UI.FontSize` and `UI.FontSizeSmall`.
 - **F9** — toggle the DPS panel (configurable: `ToggleKey`)
 - **F10** — toggle the damage-taken panel (configurable: `TakenUI.ToggleKey`)
 - **F11** — toggle the stage-compare panel (configurable: `CompareUI.ToggleKey`)
+- **F7** — toggle the gear-score panel (configurable: `GearScoreUI.ToggleKey`)
 - **F6** — toggle the farming planner (configurable: `FarmUI.ToggleKey`)
 - **F5** — toggle the box log (configurable: `BoxUI.ToggleKey`)
-- **F7** — toggle the opened-box stats panel (configurable: `BoxOpenUI.ToggleKey`)
+- **F4** — toggle the opened-box stats panel (configurable: `BoxOpenUI.ToggleKey`)
 - **F3** — toggle the loot heatmap (configurable: `LootMapUI.ToggleKey`)
 - **F4** — enter the price-box position-adjust (drag) mode (configurable: `Price.AdjustKey`)
 - **Right-click an item** — pin / unpin the price box to it (then hover the curve to read each day)
