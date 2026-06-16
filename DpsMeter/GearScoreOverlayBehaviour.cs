@@ -132,7 +132,7 @@ namespace TbhDpsMeter
                 if (!_placed) PlaceDefault();
                 int fs = Plugin.FontSize.Value; float lh = fs + 7;
                 float x = _rect.x, w = _rect.width, ix = x + Pad, iw = w - Pad * 2;
-                float rowH = lh * 1.5f;
+                float rowH = lh * 1.25f;   // item row height (icon + main-font name), kept tight
 
                 // measure
                 float h = Pad + lh;   // header
@@ -179,17 +179,18 @@ namespace TbhDpsMeter
                     foreach (var g in snap.Equipment)
                     {
                         var sc = GearScore.ScoreItem(g);
-                        var iconRect = new Rect(ix, cy, rowH - 4, rowH - 4);
+                        var iconRect = new Rect(ix, cy, rowH - 3, rowH - 3);
                         Texture tex = GearIconCache.Get(g.ItemKey) ?? g.Icon as Texture;
                         if (tex != null) GUI.DrawTexture(iconRect, tex, ScaleMode.ScaleToFit);
                         else { var prev = GUI.color; GUI.color = new Color(1, 1, 1, 0.12f); GUI.DrawTexture(iconRect, _white); GUI.color = prev; }
                         float tx = ix + rowH;
-                        string lvl = g.Level > 0 ? $" <size=10><color=#8a93a0>Lv{g.Level}</color></size>" : "";
+                        float ty = cy + (rowH - lh) * 0.5f;   // vertically centre the name in the row
+                        string lvl = g.Level > 0 ? $" <size=11><color=#8a93a0>Lv{g.Level}</color></size>" : "";
                         // applied-socket badge (裝飾/雕刻/銘文): ◆ per filled socket
                         int sk = g.DecoCount + g.EngraveCount + g.InscribeCount;
-                        string socks = sk > 0 ? $" <size=10><color=#67d6c3>{new string('◆', Mathf.Min(sk, 6))}{(sk > 6 ? "+" : "")}</color></size>" : "";
-                        GUI.Label(new Rect(tx, cy, iw - rowH - 64, rowH), $"<color=#{GradeColor(g.Grade)}>{g.Name}</color>{lvl}{socks}", _tiny);
-                        GUI.Label(new Rect(x + w - Pad - 60, cy, 56, rowH), $"<color=#7FB2FF>{sc.Total:0}</color>", _label);
+                        string socks = sk > 0 ? $" <size=11><color=#67d6c3>{new string('◆', Mathf.Min(sk, 6))}{(sk > 6 ? "+" : "")}</color></size>" : "";
+                        GUI.Label(new Rect(tx, ty, iw - rowH - 64, lh), $"<color=#{GradeColor(g.Grade)}>{g.Name}</color>{lvl}{socks}", _label);
+                        GUI.Label(new Rect(x + w - Pad - 60, ty, 56, lh), $"<color=#7FB2FF>{sc.Total:0}</color>", _label);
                         cy += rowH;
                         if (_detailed)
                             foreach (var p in sc.Parts)
