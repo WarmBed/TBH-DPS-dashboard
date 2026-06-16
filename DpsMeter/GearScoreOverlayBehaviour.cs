@@ -180,7 +180,7 @@ namespace TbhDpsMeter
                     {
                         var sc = GearScore.ScoreItem(g);
                         var iconRect = new Rect(ix, cy, rowH - 4, rowH - 4);
-                        var tex = g.Icon as Texture;
+                        Texture tex = GearIconCache.Get(g.ItemKey) ?? g.Icon as Texture;
                         if (tex != null) GUI.DrawTexture(iconRect, tex, ScaleMode.ScaleToFit);
                         else { var prev = GUI.color; GUI.color = new Color(1, 1, 1, 0.12f); GUI.DrawTexture(iconRect, _white); GUI.color = prev; }
                         float tx = ix + rowH;
