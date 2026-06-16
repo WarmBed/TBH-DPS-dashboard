@@ -139,7 +139,7 @@ namespace TbhDpsMeter
                 foreach (var snap in _party)
                 {
                     h += lh;          // character name + total
-                    foreach (var g in snap.Equipment) { h += rowH; if (_detailed) h += lh * Mathf.Max(1, GearScore.ScoreItem(g).Parts.Count); }
+                    foreach (var g in snap.Equipment) { h += rowH; if (_detailed) h += lh * 0.92f * GearScore.ScoreItem(g).Parts.Count; }
                 }
                 if (_party.Count == 0) h += lh;
                 h += Pad;
@@ -192,13 +192,22 @@ namespace TbhDpsMeter
                         GUI.Label(new Rect(tx, ty, iw - rowH - 64, lh), $"<color=#{GradeColor(g.Grade)}>{g.Name}</color>{lvl}{socks}", _label);
                         GUI.Label(new Rect(x + w - Pad - 60, ty, 56, lh), $"<color=#7FB2FF>{sc.Total:0}</color>", _label);
                         cy += rowH;
-                        if (_detailed)
+                        if (_detailed && sc.Parts.Count > 0)
+                        {
+                            float subH = lh * 0.92f;
+                            float blockTop = cy + 1;
+                            float guideX = ix + 6;          // vertical guide under the icon column
                             foreach (var p in sc.Parts)
                             {
-                                GUI.Label(new Rect(tx + 10, cy, iw - rowH - 64, lh), $"<color=#9aa3af>{Loc.G(p.Label)}</color>", _dim);
-                                GUI.Label(new Rect(x + w - Pad - 60, cy, 56, lh), $"<color=#7c93ad>{p.Points:0.#}</color>", _dim);
-                                cy += lh;
+                                GUI.Label(new Rect(tx + 6, cy, iw - rowH - 64, subH), $"<color=#9aa3af>{Loc.G(p.Label)}</color>", _dim);
+                                GUI.Label(new Rect(x + w - Pad - 60, cy, 56, subH), $"<color=#8aa0b6>{p.Points:0.#}</color>", _dim);
+                                cy += subH;
                             }
+                            // faint vertical guide grouping this item's sub-rows
+                            var gprev = GUI.color; GUI.color = new Color(1f, 1f, 1f, 0.13f);
+                            GUI.DrawTexture(new Rect(guideX, blockTop, 1f, cy - blockTop - 2f), _white);
+                            GUI.color = gprev;
+                        }
                     }
                 }
                 _resize.DrawGrip(_white, _rect);
