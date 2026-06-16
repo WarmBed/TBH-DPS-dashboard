@@ -841,23 +841,23 @@ namespace TbhDpsMeter
         /// EEquipClassType — same by-type resolution as <see cref="ReadClass"/>, so it survives obfuscation.
         /// Reflection runs on the runtime type, so a statically-typed Unit still works. 0 = unknown.
         /// Used by the damage hook to attribute each hit to a character.</summary>
+        private static bool _attackerCastLogged;
         public static int ReadHeroKeyOf(object unit)
         {
             try
             {
                 if (unit == null) return 0;
-                var cache = Refl.Get(unit, "cache");
-                if (cache == null) return 0;
-                if (!_classResolved)
+                // DamageInfo.Attacker is an Il2Cpp Unit wrapper — reflection can't see Hero.cache on it.
+                // TryCast to the concrete Hero (b_isHero already guaranteed it), then reuse ReadHeroKey.
+                var baseObj = unit as Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase;
+                var hero = baseObj?.TryCast<Hero>();
+                if (!_attackerCastLogged)
                 {
-                    _classResolved = true;
-                    foreach (var p in cache.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
-                        if (p.CanRead && p.GetIndexParameters().Length == 0 && p.PropertyType.Name == "EEquipClassType") { _classProp = p; break; }
-                    Plugin.Logger?.LogInfo("[selfcheck] attacker cache class property -> " + (_classProp != null ? _classProp.Name : "MISSING"));
+                    _attackerCastLogged = true;
+                    Plugin.Logger?.LogInfo("[selfcheck] attacker -> Hero cast " + (hero != null ? "ok" : "NULL"));
                 }
-                if (_classProp == null) return 0;
-                int cls = Convert.ToInt32(_classProp.GetValue(cache));
-                return cls > 0 ? cls * 100 + 1 : 0;
+                if (hero == null) return 0;
+                return ReadHeroKey(hero);
             }
             catch { return 0; }
         }
