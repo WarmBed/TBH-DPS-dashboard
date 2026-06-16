@@ -139,7 +139,7 @@ namespace TbhDpsMeter
                 foreach (var snap in _party)
                 {
                     h += lh;          // character name + total
-                    foreach (var g in snap.Equipment) { h += rowH; if (_detailed) h += lh * 0.9f * Mathf.Max(1, GearScore.ScoreItem(g).Parts.Count); }
+                    foreach (var g in snap.Equipment) { h += rowH; if (_detailed) h += lh * Mathf.Max(1, GearScore.ScoreItem(g).Parts.Count); }
                 }
                 if (_party.Count == 0) h += lh;
                 h += Pad;
@@ -174,7 +174,7 @@ namespace TbhDpsMeter
                     string nm = string.IsNullOrEmpty(snap.CharacterName) ? snap.Character : snap.CharacterName;
                     GUI.Label(new Rect(ix, cy, iw, lh),
                         $"<b><color=#FFC857>{nm}</color></b>  <color=#7FB2FF>{cs.Total:0}</color>" +
-                        $"  <size=11><color=#ef6a5a>⚔{cs.Attack:0}</color> <color=#5fd07c>⛨{cs.Defense:0}</color></size>", _label);
+                        $"   <color=#ef6a5a>⚔{cs.Attack:0}</color> <color=#5fd07c>⛨{cs.Defense:0}</color>", _label);
                     cy += lh;
                     foreach (var g in snap.Equipment)
                     {
@@ -185,19 +185,19 @@ namespace TbhDpsMeter
                         else { var prev = GUI.color; GUI.color = new Color(1, 1, 1, 0.12f); GUI.DrawTexture(iconRect, _white); GUI.color = prev; }
                         float tx = ix + rowH;
                         float ty = cy + (rowH - lh) * 0.5f;   // vertically centre the name in the row
-                        string lvl = g.Level > 0 ? $" <size=11><color=#8a93a0>Lv{g.Level}</color></size>" : "";
+                        string lvl = g.Level > 0 ? $" <color=#9aa1ad>Lv{g.Level}</color>" : "";
                         // applied-socket badge (裝飾/雕刻/銘文): ◆ per filled socket
                         int sk = g.DecoCount + g.EngraveCount + g.InscribeCount;
-                        string socks = sk > 0 ? $" <size=11><color=#67d6c3>{new string('◆', Mathf.Min(sk, 6))}{(sk > 6 ? "+" : "")}</color></size>" : "";
+                        string socks = sk > 0 ? $" <color=#67d6c3>{new string('◆', Mathf.Min(sk, 6))}{(sk > 6 ? "+" : "")}</color>" : "";
                         GUI.Label(new Rect(tx, ty, iw - rowH - 64, lh), $"<color=#{GradeColor(g.Grade)}>{g.Name}</color>{lvl}{socks}", _label);
                         GUI.Label(new Rect(x + w - Pad - 60, ty, 56, lh), $"<color=#7FB2FF>{sc.Total:0}</color>", _label);
                         cy += rowH;
                         if (_detailed)
                             foreach (var p in sc.Parts)
                             {
-                                GUI.Label(new Rect(tx + 8, cy, iw - rowH - 64, lh * 0.9f), $"<size=10><color=#9aa3af>{Loc.G(p.Label)}</color></size>", _tiny);
-                                GUI.Label(new Rect(x + w - Pad - 60, cy, 56, lh * 0.9f), $"<size=10><color=#7c93ad>{p.Points:0.#}</color></size>", _tiny);
-                                cy += lh * 0.9f;
+                                GUI.Label(new Rect(tx + 10, cy, iw - rowH - 64, lh), $"<color=#9aa3af>{Loc.G(p.Label)}</color>", _dim);
+                                GUI.Label(new Rect(x + w - Pad - 60, cy, 56, lh), $"<color=#7c93ad>{p.Points:0.#}</color>", _dim);
+                                cy += lh;
                             }
                     }
                 }
