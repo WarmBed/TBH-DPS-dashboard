@@ -71,14 +71,20 @@ namespace TbhDpsMeter
                     _loadImageTried = true;
                     var t = Refl.FindType("UnityEngine.ImageConversion");
                     if (t != null)
+                    {
+                        // prefer the 2-arg LoadImage(Texture2D, byte[]); accept the 3-arg overload too.
+                        System.Reflection.MethodInfo best = null;
                         foreach (var m in t.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
                         {
                             if (m.Name != "LoadImage") continue;
                             var ps = m.GetParameters();
-                            if (ps.Length >= 2 && ps[0].ParameterType.Name == "Texture2D"
-                                && ps[1].ParameterType.Name.Contains("Byte")) { _loadImage = m; break; }
+                            if (ps.Length < 2 || ps[0].ParameterType.Name != "Texture2D") continue;
+                            if (best == null || ps.Length < best.GetParameters().Length) best = m;
                         }
-                    Plugin.Logger?.LogInfo("[gearicon] ImageConversion.LoadImage -> " + (_loadImage != null ? "ok" : "MISSING"));
+                        _loadImage = best;
+                    }
+                    Plugin.Logger?.LogInfo("[gearicon] ImageConversion type=" + (t != null ? "ok" : "null")
+                        + " LoadImage=" + (_loadImage != null ? _loadImage.GetParameters().Length + "-arg" : "MISSING"));
                 }
                 if (_loadImage == null) return false;
                 var arr = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<byte>(data);
