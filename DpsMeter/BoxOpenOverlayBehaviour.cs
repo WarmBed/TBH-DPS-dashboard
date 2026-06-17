@@ -62,6 +62,19 @@ namespace TbhDpsMeter
         /// loot-heatmap tooltip can color grade names identically (one source of truth).</summary>
         public static string GradeHex(int g) => Hex(g >= 0 && g < GradeColors.Length ? GradeColors[g] : Color.white);
 
+        // box-kind colour for the log's 箱種 column, matching the F5 box-log / F3 heatmap scheme:
+        // 一般 white · 王箱 blue · 首領 gold.
+        private static string KindHex(int kind)
+        {
+            switch (kind)
+            {
+                case (int)BoxKind.Boss: return "#7FB2FF";     // 王箱 blue
+                case (int)BoxKind.ActBoss: return "#FFC04D";  // 首領 gold
+                case (int)BoxKind.Normal: return "#eaf3ee";   // 一般 white
+                default: return "#9aa3b0";                    // 未知 dim
+            }
+        }
+
         private Rect ScaledRect() => new Rect(_rect.x, _rect.y, _rect.width * _scale, _rect.height * _scale);
 
         void Awake()
@@ -293,9 +306,9 @@ namespace TbhDpsMeter
                         string gc = Hex(e.Grade >= 0 && e.Grade < GradeColors.Length ? GradeColors[e.Grade] : Color.white);
                         int kind = (e.Kind >= 0 && e.Kind < kindShort.Length) ? e.Kind : (int)BoxKind.Unknown;
                         GUI.Label(new Rect(ix, ry, iw * 0.22f, lh), $"<color=#aeb6c2>{e.Time:HH:mm:ss}</color>", _tiny);
-                        GUI.Label(new Rect(ix + iw * 0.22f, ry, iw * 0.20f, lh), $"<color=#9aa3b0>{Loc.G(kindShort[kind])}</color>", _tiny);
+                        GUI.Label(new Rect(ix + iw * 0.22f, ry, iw * 0.20f, lh), $"<color={KindHex(kind)}>{Loc.G(kindShort[kind])}</color>", _tiny);
                         GUI.Label(new Rect(ix + iw * 0.42f, ry, iw * 0.22f, lh), $"<color={gc}>{Loc.G("grade_" + BoxGrade.KeyOf(e.Grade))}</color>", _tiny);
-                        GUI.Label(new Rect(ix + iw * 0.64f, ry, iw * 0.36f, lh), $"<color=#eaf3ee>{ResolveItem(e.Name)}</color>", _tiny);
+                        GUI.Label(new Rect(ix + iw * 0.64f, ry, iw * 0.36f, lh), $"<color={gc}>{ResolveItem(e.Name)}</color>", _tiny);
                     }
                     if (n == 0) GUI.Label(new Rect(ix, listTop, iw, lh), $"<color=#8a93a0>{Loc.G("box_empty")}</color>", _tiny);
                     DrawScrollbar(ix, listTop, iw, listAreaH, n, visible, first, maxFirst);
