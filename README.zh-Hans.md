@@ -1,6 +1,10 @@
 # TBH DPS Meter
 
 [English](README.md) · [日本語](README.ja.md) · [繁體中文](README.zh-Hant.md) · **简体中文**
+&nbsp;&nbsp;
+[![Release](https://img.shields.io/github/v/release/WarmBed/TBH-DPS-dashboard?logo=github&label=release&color=orange)](../../releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/WarmBed/TBH-DPS-dashboard/total?logo=github&label=downloads&color=brightgreen)](../../releases)
+[![Stars](https://img.shields.io/github/stars/WarmBed/TBH-DPS-dashboard?logo=github&style=flat&label=stars&color=blue)](../../stargazers)
 
 **TaskBarHero**（TBH: Task Bar Hero）的游戏内 **DPS / 承受伤害 / 关卡比较 / 装备评分 / 刷关效率 / 宝箱记录 / 开箱统计 / 掉宝热力图 / Steam 市场查价** 监控插件，
 全部都能从 **F1 中控台** 一键开关。以 BepInEx 6 IL2CPP 插件实现。测试版本 **v1.00.09**（Unity 6 / IL2CPP）。

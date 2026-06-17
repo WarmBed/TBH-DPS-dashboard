@@ -1,6 +1,10 @@
 # TBH DPS Meter
 
 **English** · [日本語](README.ja.md) · [繁體中文](README.zh-Hant.md) · [简体中文](README.zh-Hans.md)
+&nbsp;&nbsp;
+[![Release](https://img.shields.io/github/v/release/WarmBed/TBH-DPS-dashboard?logo=github&label=release&color=orange)](../../releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/WarmBed/TBH-DPS-dashboard/total?logo=github&label=downloads&color=brightgreen)](../../releases)
+[![Stars](https://img.shields.io/github/stars/WarmBed/TBH-DPS-dashboard?logo=github&style=flat&label=stars&color=blue)](../../stargazers)
 
 In-game overlay for **TaskBarHero** (TBH: Task Bar Hero) — **DPS · damage-taken · stage-compare ·
 gear-score · farming-planner · box-log · opened-box stats · loot-heatmap · Steam-market price-peek**,

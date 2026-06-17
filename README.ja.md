@@ -1,6 +1,10 @@
 # TBH DPS Meter
 
 [English](README.md) · **日本語** · [繁體中文](README.zh-Hant.md) · [简体中文](README.zh-Hans.md)
+&nbsp;&nbsp;
+[![Release](https://img.shields.io/github/v/release/WarmBed/TBH-DPS-dashboard?logo=github&label=release&color=orange)](../../releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/WarmBed/TBH-DPS-dashboard/total?logo=github&label=downloads&color=brightgreen)](../../releases)
+[![Stars](https://img.shields.io/github/stars/WarmBed/TBH-DPS-dashboard?logo=github&style=flat&label=stars&color=blue)](../../stargazers)
 
 **TaskBarHero**（TBH: Task Bar Hero）向けのゲーム内 **DPS / 被ダメージ / ステージ比較 / 装備スコア / 周回効率プランナー / 宝箱ログ / 開封統計 / ドロップ分布 / Steam マーケット価格チェック** オーバーレイ。すべて **F1 コントロール（コントロールセンター）** から表示切替できます。
 BepInEx 6 IL2CPP プラグインとして実装。動作確認バージョン **v1.00.09**（Unity 6 / IL2CPP）。
