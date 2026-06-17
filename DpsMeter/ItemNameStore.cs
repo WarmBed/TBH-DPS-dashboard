@@ -44,6 +44,27 @@ namespace TbhDpsMeter
             return Json.Str(Json.Get(names, "en-US")) ?? "";   // fall back to English
         }
 
+        // resolved-label cache (loc-key string -> display name). Only POSITIVE results are cached, so a key
+        // unresolved because the live localizer wasn't ready yet is retried on the next frame.
+        private static readonly Dictionary<string, string> _labelCache = new Dictionary<string, string>();
+
+        /// <summary>Resolve a stored box-open item label — a loc key ("ItemName_620014") or bare id — to a
+        /// localized display name: the bundled table first, then the live game item-table localizer for items
+        /// added/renamed after this build (e.g. named rings the wiki lacks). Falls back to the raw input.</summary>
+        public static string ResolveLabel(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return "";
+            if (_labelCache.TryGetValue(key, out var cached)) return cached;
+            int us = key.LastIndexOf('_');
+            string digits = us >= 0 ? key.Substring(us + 1) : key;
+            if (!int.TryParse(digits, out int id)) return key;   // already a display name, not a key
+            string nm = Get(id);
+            if (!string.IsNullOrEmpty(nm)) { _labelCache[key] = nm; return nm; }   // bundled hit (stable)
+            string live = HeroProbe.GameLocItem(key);
+            if (!string.IsNullOrEmpty(live) && live != key) { _labelCache[key] = live; return live; }
+            return key;   // not resolved yet — don't cache, retry next frame
+        }
+
         /// <summary>English (en-US) name for an item key; "" if unknown. Steam market hash_names are in
         /// English, so this is what we match against PriceStore.</summary>
         public static string GetEn(int itemKey)

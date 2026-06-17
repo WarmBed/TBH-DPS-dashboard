@@ -34,6 +34,19 @@ namespace TbhDpsMeter
                 Plugin.Logger?.LogInfo("[selfcheck] StageCache.difficulty (ESTAGEDIFFICULTY) -> " + Prop(sc, "ESTAGEDIFFICULTY", false)
                     + " ; label = first string field shaped \"N-N\" (resolved at capture)");
 
+                // item-name localizer (separate Localization table from skills/heroes). May be too early at
+                // load — GameLocItem self-retries lazily, so an "(unresolved)" here is benign.
+                try
+                {
+                    foreach (var k in new[] { "ItemName_300001", "ItemName_620014" })
+                    {
+                        string probe = HeroProbe.GameLocItem(k);
+                        Plugin.Logger?.LogInfo($"[selfcheck] item loc {k} -> "
+                            + (string.IsNullOrEmpty(probe) ? "(unresolved at load; retries lazily)" : probe));
+                    }
+                }
+                catch { }
+
                 Plugin.Logger?.LogInfo("[selfcheck] Harmony hooks logged above as 'Patched: ...' / 'hooked ...' "
                     + "(a missing one means that method name changed).");
             }

@@ -459,6 +459,122 @@ namespace TbhDpsMeter
             return key;
         }
 
+        // ---- item-name localization (a SEPARATE Unity Localization string table from skills/heroes) ----
+        // The default facade (GameLoc / nm.gbu) only sees the default table, so item NameKeys like
+        // "ItemName_620014" (蝕月戒指) come back unresolved. Item names live in their own table queried via a
+        // table-aware facade String(table, key). We discover that method by probing known item keys, then cache
+        // (method, table, arg-order). Self-healing across the obfuscation churn, same philosophy as LocMethod().
+        private static System.Reflection.MethodInfo _itemLocMethod;
+        private static string _itemLocTable;
+        private static bool _itemLocKeyFirst;     // true: method(key, table); false: method(table, key)
+        private static float _itemLocNextTry;      // retry gate (localization may not be ready at load)
+
+        // probe keys present in the bundled table (so we know they SHOULD resolve in-game), spanning weapon /
+        // armor / accessory tables; accept if ANY resolves.
+        private static readonly string[] ItemProbeKeys = { "ItemName_300001", "ItemName_520017", "ItemName_621011" };
+
+        /// <summary>Localized item display name for a raw item NameKey ("ItemName_620014") or bare id, via the
+        /// game's item-table localizer. "" if it can't be resolved (caller keeps the bundled/raw value).</summary>
+        public static string GameLocItem(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return "";
+            var m = ItemLocMethod();
+            if (m == null) return "";
+            foreach (var k in KeyForms(key))
+            {
+                try
+                {
+                    object[] args = _itemLocKeyFirst ? new object[] { k, _itemLocTable } : new object[] { _itemLocTable, k };
+                    string s = m.Invoke(null, args) as string;
+                    if (Resolved(s, k)) return s;
+                }
+                catch { }
+            }
+            return "";
+        }
+
+        // the key as given, plus the "ItemName_<id>" form if it's a bare numeric id
+        private static System.Collections.Generic.IEnumerable<string> KeyForms(string key)
+        {
+            yield return key;
+            bool digits = key.Length > 0; foreach (var c in key) if (c < '0' || c > '9') { digits = false; break; }
+            if (digits) yield return "ItemName_" + key;
+        }
+
+        private static System.Reflection.MethodInfo ItemLocMethod()
+        {
+            if (_itemLocMethod != null) return _itemLocMethod;
+            float now = Time.realtimeSinceStartup;
+            if (now < _itemLocNextTry) return null;
+            _itemLocNextTry = now + 3f;   // bound the cost: at most one full sweep / 3s until found
+            const string garbage = "__tbh_no_such_item__";
+            try
+            {
+                // Prefer the same facade class that serves the default table (the item method is usually a
+                // sibling), then broaden to the whole assembly.
+                LocMethod();
+                var ordered = new System.Collections.Generic.List<Type>();
+                if (_locMethod != null && _locMethod.DeclaringType != null) ordered.Add(_locMethod.DeclaringType);
+                foreach (var t in typeof(Hero).Assembly.GetTypes()) if (!ordered.Contains(t)) ordered.Add(t);
+
+                // Two item facades exist (current-language vs forced-English, like the default table's
+                // gds/gbs). PREFER the current-language one — its output carries non-ASCII glyphs for CJK/
+                // accented locales. Keep the first ASCII hit only as a fallback (English game, or no CJK facade).
+                System.Reflection.MethodInfo asciiM = null; string asciiTable = null; bool asciiKeyFirst = false; string asciiHit = null;
+                foreach (var t in ordered)
+                {
+                    System.Reflection.MethodInfo[] ms;
+                    try { ms = t.GetMethods(BindingFlags.Public | BindingFlags.Static); } catch { continue; }
+                    foreach (var mm in ms)
+                    {
+                        if (mm.ReturnType != typeof(string)) continue;
+                        var ps = mm.GetParameters();
+                        if (ps.Length != 2 || ps[0].ParameterType != typeof(string) || ps[1].ParameterType != typeof(string)) continue;
+                        foreach (var table in ItemTables)
+                            for (int order = 0; order < 2; order++)
+                            {
+                                bool keyFirst = order == 1;
+                                // garbage key must PASS THROUGH (proves a lookup, not a string transform)
+                                if (Invoke2(mm, keyFirst, table, garbage, out string rg) && Resolved(rg, garbage)) continue;
+                                foreach (var pk in ItemProbeKeys)
+                                    if (Invoke2(mm, keyFirst, table, pk, out string rv) && Resolved(rv, pk))
+                                    {
+                                        if (HasNonAscii(rv))   // current-language facade — take it now
+                                        {
+                                            _itemLocMethod = mm; _itemLocTable = table; _itemLocKeyFirst = keyFirst;
+                                            Plugin.Logger?.LogInfo($"[selfcheck] item localization facade -> {t.Name}.{mm.Name}({(keyFirst ? "key,table" : "table,key")}) table='{table}' ({pk}={rv}) [current-lang]");
+                                            return _itemLocMethod;
+                                        }
+                                        if (asciiM == null) { asciiM = mm; asciiTable = table; asciiKeyFirst = keyFirst; asciiHit = $"{t.Name}.{mm.Name}({(keyFirst ? "key,table" : "table,key")}) table='{table}' ({pk}={rv})"; }
+                                        break;   // this (method,table,order) resolves; stop probing keys for it
+                                    }
+                            }
+                    }
+                }
+                if (asciiM != null)
+                {
+                    _itemLocMethod = asciiM; _itemLocTable = asciiTable; _itemLocKeyFirst = asciiKeyFirst;
+                    Plugin.Logger?.LogInfo("[selfcheck] item localization facade -> " + asciiHit + " [ascii]");
+                    return _itemLocMethod;
+                }
+                Plugin.Logger?.LogWarning("[selfcheck] item localization facade -> not found (named items show keys; will retry)");
+            }
+            catch { }
+            return _itemLocMethod;
+        }
+
+        private static bool Invoke2(System.Reflection.MethodInfo m, bool keyFirst, string table, string key, out string result)
+        {
+            result = null;
+            try
+            {
+                object[] args = keyFirst ? new object[] { key, table } : new object[] { table, key };
+                result = m.Invoke(null, args) as string;
+                return result != null;
+            }
+            catch { return false; }
+        }
+
         private static bool HasNonAscii(string s)
         {
             if (string.IsNullOrEmpty(s)) return false;
@@ -519,8 +635,10 @@ namespace TbhDpsMeter
             return _locMethod;
         }
 
-        // item names live in a non-default Localization table; try gbt(table, key) candidates.
-        private static readonly string[] ItemTables = { "Item", "Items", "ItemTable", "ItemName", "Equipment", "Gear" };
+        // item names live in a non-default Localization table; these are the candidate table names the
+        // discovery in ItemLocMethod() probes against (first hit wins).
+        private static readonly string[] ItemTables =
+            { "Item", "Items", "ItemName", "ItemNames", "ItemTable", "Equipment", "Gear", "Weapon", "ITEM", "item", "Common" };
 
         /// <summary>Localized skill name for a skill key (from the save's equippedSKillKey), via the
         /// localization facade. Empty if it can't be resolved (caller shows the key instead).</summary>

@@ -308,24 +308,9 @@ namespace TbhDpsMeter
 
         private void SaveBoxOpenSize() { Plugin.BoxOpenPanelWidth.Value = _rect.width; Plugin.BoxOpenPanelHeight.Value = _listH; }
 
-        // BoxOpenLog stores a loc key like "ItemName_113003"; resolve the trailing id via the bundled
-        // item table (live-localized), falling back to the raw key if unknown.
-        private static string ResolveItem(string key)
-        {
-            if (string.IsNullOrEmpty(key)) return "";
-            int us = key.LastIndexOf('_');
-            string digits = us >= 0 ? key.Substring(us + 1) : key;
-            if (int.TryParse(digits, out int id))
-            {
-                string nm = ItemNameStore.Get(id);
-                if (!string.IsNullOrEmpty(nm)) return nm;
-            }
-            // not in the bundled table (e.g. an item added after this build) -> ask the live game
-            // localization facade, which knows every current item in the player's language.
-            string live = HeroProbe.GameLoc(key);
-            if (!string.IsNullOrEmpty(live) && live != key) return live;
-            return key;
-        }
+        // BoxOpenLog stores a loc key like "ItemName_113003"; resolve via the bundled item table, then the
+        // live game item-table localizer for anything the bundle lacks (e.g. named rings). See ResolveLabel.
+        private static string ResolveItem(string key) => ItemNameStore.ResolveLabel(key);
 
         private void DrawScrollbar(float ix, float listTop, float iw, float listAreaH, int count, int visible, int first, int maxFirst)
         {

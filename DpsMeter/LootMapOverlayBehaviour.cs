@@ -452,13 +452,6 @@ namespace TbhDpsMeter
             return sb.ToString();
         }
 
-        private static string ResolveItem(string key)
-        {
-            if (string.IsNullOrEmpty(key)) return "";
-            int us = key.LastIndexOf('_');
-            string digits = us >= 0 ? key.Substring(us + 1) : key;
-            if (int.TryParse(digits, out int id)) { string nm = ItemNameStore.Get(id); if (!string.IsNullOrEmpty(nm)) return nm; }
-            return key;
-        }
+        private static string ResolveItem(string key) => ItemNameStore.ResolveLabel(key);
     }
 }
