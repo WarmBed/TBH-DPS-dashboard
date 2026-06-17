@@ -221,6 +221,8 @@ namespace TbhDpsMeter
             { "box_title",      new[] { "寶箱記錄", "Box Log", "宝箱ログ", "宝箱记录", "Cajas" } },
             { "box_total",      new[] { "總計", "Total", "合計", "总计", "Total" } },
             { "box_boss",       new[] { "王箱", "Boss", "ボス箱", "王箱", "Jefe" } },
+            { "box_white",      new[] { "白箱", "White", "白箱", "白箱", "Blanca" } },
+            { "box_blue",       new[] { "藍箱", "Blue", "青箱", "蓝箱", "Azul" } },
             { "box_sound",      new[] { "音效", "Sound", "音声", "音效", "Sonido" } },
             { "box_vol",        new[] { "音量", "Vol", "音量", "音量", "Vol" } },
             { "box_test",       new[] { "試聽", "Test", "試聴", "试听", "Probar" } },

@@ -19,26 +19,30 @@ namespace TbhDpsMeter
         /// <summary>Register both hooks. Call once from Plugin.Load with the shared Harmony instance.</summary>
         public static void Install(Harmony harmony)
         {
-            // Hook A: StageBox open method(s) taking a single EBoxType -> remember the kind.
+            // Hook A: the REAL box-open method on StageBox takes a WillRemoveBoxData (whose public field
+            // `EBoxType BoxType` IS the box being opened) — lgz/lha(WillRemoveBoxData, uc) -> UniTask<bool>.
+            // The old "single EBoxType param" hooks were panel-setup spam (lgl sweeps all slots; lgx never
+            // fires on a real open) and left kind=Unknown. Resolve by SIGNATURE (1st param type name
+            // "WillRemoveBoxData") so method-name churn (lgz/lha→…) doesn't break it; BoxType/m_boxType are
+            // non-obfuscated so the value reads survive updates.
             try
             {
                 var sb = AccessTools.TypeByName("TaskbarHero.UI.StageBox");
-                var ebox = AccessTools.TypeByName("TaskbarHero.EBoxType");
                 int hooked = 0;
-                if (sb != null && ebox != null)
+                if (sb != null)
                 {
-                    var pre = new HarmonyMethod(typeof(BoxOpenTracker).GetMethod(nameof(OpenPrefix), BindingFlags.NonPublic | BindingFlags.Static));
+                    var pre = new HarmonyMethod(typeof(BoxOpenTracker).GetMethod(nameof(OpenBoxPrefix), BindingFlags.NonPublic | BindingFlags.Static));
                     foreach (var m in sb.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
                     {
                         var ps = m.GetParameters();
-                        if (ps.Length == 1 && ps[0].ParameterType == ebox)
+                        if (ps.Length >= 1 && ps[0].ParameterType.Name == "WillRemoveBoxData")
                         {
-                            try { harmony.Patch(m, prefix: pre); hooked++; }
+                            try { harmony.Patch(m, prefix: pre); hooked++; Plugin.Logger?.LogInfo("[boxopen] hooked StageBox." + m.Name + "(WillRemoveBoxData)"); }
                             catch (Exception e) { Plugin.Logger?.LogWarning("[boxopen] StageBox patch " + m.Name + ": " + e.Message); }
                         }
                     }
                 }
-                else Plugin.Logger?.LogWarning("[boxopen] StageBox/EBoxType type not found");
+                else Plugin.Logger?.LogWarning("[boxopen] StageBox type not found");
                 Plugin.Logger?.LogInfo($"[boxopen] StageBox open hooks: {hooked}");
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("[boxopen] StageBox hook failed: " + e.Message); }
@@ -71,12 +75,17 @@ namespace TbhDpsMeter
             catch (Exception e) { Plugin.Logger?.LogWarning("[boxopen] LogManager hook failed: " + e.Message); }
         }
 
-        // __0 is the EBoxType param (int-compatible 0..2); Unknown if outside range.
-        private static void OpenPrefix(TaskbarHero.EBoxType __0)
+        // The opening box's source type = WillRemoveBoxData.BoxType (the EBoxType the open was started with).
+        // __0 is that struct; __instance is the StageBox (its m_boxType is the same box, used as a backup).
+        private static void OpenBoxPrefix(object __instance, object __0)
         {
-            int v = (int)__0;
-            _openingKind = (v >= 0 && v <= 2) ? v : (int)BoxKind.Unknown;
+            int k = (int)BoxKind.Unknown;
+            try { var bt = Refl.Get(__0, "BoxType"); if (bt != null) { int v = Convert.ToInt32(bt); if (v >= 0 && v <= 2) k = v; } } catch { }
+            if (k == (int)BoxKind.Unknown) { try { int v = Convert.ToInt32(Refl.Get(__instance, "m_boxType")); if (v >= 0 && v <= 2) k = v; } catch { } }
+            _openingKind = k;
+            if (_openDiag < 10) { _openDiag++; int inst = -1; try { inst = Convert.ToInt32(Refl.Get(__instance, "m_boxType")); } catch { } Plugin.Logger?.LogInfo($"[boxopen] OPEN BoxType={k} m_boxType={inst}"); }
         }
+        private static int _openDiag;
 
         private static int _diagCount;
 
@@ -114,7 +123,7 @@ namespace TbhDpsMeter
 
                 Stats.Add(new BoxOpenEvent { Time = DateTime.Now, Grade = grade, Kind = _openingKind, Name = name, Stage = stage });
 
-                if (_diagCount < 5) { _diagCount++; Plugin.Logger?.LogInfo($"[boxopen] CAPTURED grade={grade} kind={_openingKind} name={name}"); }
+                if (_diagCount < 8) { _diagCount++; Plugin.Logger?.LogInfo($"[boxopen] CAPTURED grade={grade} kind={_openingKind} name={name}"); }
 
                 var now = DateTime.Now;
                 if ((now - _lastFlush).TotalSeconds >= 2.0) { _lastFlush = now; BoxOpenStore.Save(Stats); }

@@ -14,7 +14,7 @@ namespace TbhDpsMeter
     {
         public const string Guid = "tbh.dpsmeter";
         public const string Name = "TBH DPS Meter";
-        public const string Version = "0.9.10";
+        public const string Version = "0.9.15";
 
         public static DpsTracker Tracker;
         public static DamageTakenTracker TakenTracker;
@@ -245,7 +245,7 @@ namespace TbhDpsMeter
 
             BoxStore.Dir = System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "dpsmeter_boxlog");
             BoxOpenStore.Dir = System.IO.Path.Combine(BepInEx.Paths.ConfigPath, "dpsmeter_boxopen");
-            try { foreach (var e in BoxStore.LoadAll(500)) BoxTracker.Events.Add(e); } catch { }
+            try { foreach (var e in BoxStore.LoadAll(0)) BoxTracker.Events.Add(e); } catch { }
             try { BoxOpenStore.Load(BoxOpenTracker.Stats); } catch { }
             BoxOpenTracker.Install(harmony);
 

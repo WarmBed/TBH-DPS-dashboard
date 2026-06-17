@@ -157,27 +157,33 @@ namespace TbhDpsMeter
 
                 var ev = BoxTracker.Events;
                 // session stats
+                // Per-hour rate is computed over the FULL recorded span (first→last event of that color),
+                // mirroring the 掉寶熱力圖's total/span model — not session-only, which reads ~0 right after
+                // a restart. Per-color first/last so each rate reflects its own active window.
                 var perStage = new Dictionary<string, int>();
-                int bossCount = 0;
-                foreach (var e in ev) { string s = string.IsNullOrEmpty(e.Stage) ? "?" : e.Stage; perStage.TryGetValue(s, out int c); perStage[s] = c + 1; if (IsBoss(e.Type)) bossCount++; }
-                // per-hour reflects THIS session only (events since launch), so the persisted history
-                // doesn't dilute the live rate to ~0.
-                int sessCount = 0; DateTime sFirst = default, sLast = default;
+                int whiteCount = 0, blueCount = 0, actCount = 0;   // 白=一般, 藍=Stage Boss, 首領=Act Boss
+                DateTime wFirst = default, wLast = default, bFirst = default, bLast = default;
                 foreach (var e in ev)
                 {
-                    if (e.Time < Plugin.SessionStart) continue;
-                    if (sessCount == 0) sFirst = e.Time;
-                    sLast = e.Time; sessCount++;
+                    string s = string.IsNullOrEmpty(e.Stage) ? "?" : e.Stage; perStage.TryGetValue(s, out int c); perStage[s] = c + 1;
+                    switch (Classify(e.Type))
+                    {
+                        case 2: actCount++; break;
+                        case 1: if (blueCount == 0) bFirst = e.Time; bLast = e.Time; blueCount++; break;
+                        default: if (whiteCount == 0) wFirst = e.Time; wLast = e.Time; whiteCount++; break;
+                    }
                 }
-                double hours = sessCount >= 2 ? (sLast - sFirst).TotalHours : 0;
-                double perHr = hours > 0.0003 ? sessCount / hours : 0;
+                double wHrs = whiteCount >= 2 ? (wLast - wFirst).TotalHours : 0;
+                double bHrs = blueCount >= 2 ? (bLast - bFirst).TotalHours : 0;
+                double whitePerHr = wHrs > 0.0003 ? whiteCount / wHrs : 0;
+                double bluePerHr = bHrs > 0.0003 ? blueCount / bHrs : 0;
                 int statRows = Mathf.Min(perStage.Count, 6);
 
                 int n = ev.Count;
                 int visible = Mathf.Max(1, Mathf.FloorToInt(_listH / lh));
                 float listAreaH = visible * lh;
 
-                float h = Pad + lh /*title*/ + lh /*summary*/ + (_settingsOpen ? lh * 2 : 0) /*sound + file rows*/ + (statRows > 0 ? lh * 0.4f + lh * statRows : 0)
+                float h = Pad + lh /*title*/ + lh * 2 /*summary (2 lines)*/ + (_settingsOpen ? lh * 2 : 0) /*sound + file rows*/ + (statRows > 0 ? lh * 0.4f + lh * statRows : 0)
                     + lh /*log header*/ + listAreaH /*scrollable list*/ + Pad;
                 _rect.height = h;
                 _scale = UiScale.Fit(_rect.width, _rect.height);
@@ -200,8 +206,20 @@ namespace TbhDpsMeter
                 _closeRect = new Rect(x + w - 26, cy - 2, 22, lh); GUI.Button(_closeRect, "✕", _btn);
                 cy += lh;
 
-                // summary
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#aeb6c2>{Loc.G("box_total")} <color=#eaf3ee>{ev.Count}</color>　{Loc.G("box_boss")} <color=#7FB2FF>{bossCount}</color>　{Loc.G("box_per_hr")} <color=#eaf3ee>{perHr:0.#}</color></color>", _label);
+                // summary: 總計 · 白箱 (w%) · 藍箱 (b%) · 首領 · 白:藍 r:1 · 個/小時
+                int total = ev.Count;
+                double wPct = total > 0 ? 100.0 * whiteCount / total : 0;
+                double bPct = total > 0 ? 100.0 * blueCount / total : 0;
+                GUI.Label(new Rect(ix, cy, iw, lh),
+                    $"<color=#aeb6c2>{Loc.G("box_total")} <color=#eaf3ee>{total}</color>　" +
+                    $"{Loc.G("box_white")} <color=#eaf3ee>{whiteCount}</color> <size=10><color=#8a93a0>{wPct:0.#}%</color></size>　" +
+                    $"{Loc.G("box_blue")} <color=#7FB2FF>{blueCount}</color> <size=10><color=#8a93a0>{bPct:0.#}%</color></size>" +
+                    (actCount > 0 ? $"　{Loc.G("box_kind_actboss")} <color=#FFC04D>{actCount}</color>" : "") +
+                    $"</color>", _label);
+                cy += lh;
+                GUI.Label(new Rect(ix, cy, iw, lh),
+                    $"<color=#aeb6c2>{Loc.G("box_white")} <color=#eaf3ee>{whitePerHr:0.#}</color> <size=10>{Loc.G("box_per_hr")}</size>　" +
+                    $"{Loc.G("box_blue")} <color=#7FB2FF>{bluePerHr:0.#}</color> <size=10>{Loc.G("box_per_hr")}</size></color>", _label);
                 cy += lh;
 
                 // sound row (only when the ⚙ settings panel is open): 音效 [開/關]  音量 [====O----] 60%  [▶ 試聽]
@@ -273,7 +291,8 @@ namespace TbhDpsMeter
                     if ((i & 1) == 1) DrawRect(ix, ry, iw, lh, new Color(1, 1, 1, 0.03f));
                     GUI.Label(new Rect(ix, ry, iw * 0.24f, lh), $"<color=#aeb6c2>{e.Time:HH:mm:ss}</color>", _tiny);
                     GUI.Label(new Rect(ix + iw * 0.24f, ry, iw * 0.30f, lh), $"<color=#c8a24a>{LocalizeStage(e.Stage)}</color>", _tiny);
-                    string nameColor = IsBoss(e.Type) ? "#7FB2FF" : "#eaf3ee";   // boss boxes in blue
+                    int kind = Classify(e.Type);   // white=near-white, blue=Stage Boss, orange=Act Boss
+                    string nameColor = kind == 2 ? "#FFC04D" : kind == 1 ? "#7FB2FF" : "#eaf3ee";
                     GUI.Label(new Rect(ix + iw * 0.54f, ry, iw * 0.46f, lh), $"<color={nameColor}>{e.Type}</color>", _tiny);
                 }
                 if (n == 0) GUI.Label(new Rect(ix, listTop, iw, lh), $"<color=#8a93a0>{Loc.G("box_empty")}</color>", _tiny);
@@ -300,8 +319,16 @@ namespace TbhDpsMeter
             if (Mathf.Abs(t - Plugin.BoxSoundVolume.Value) > 0.005f) Plugin.BoxSoundVolume.Value = t;
         }
 
-        private static bool IsBoss(string name) =>
-            !string.IsNullOrEmpty(name) && name.IndexOf("Boss", StringComparison.OrdinalIgnoreCase) >= 0;
+        // 0 = white (Normal Monster Box), 1 = blue (Stage Boss Box), 2 = Act Boss Box.
+        // Decoded box names ("Normal/Stage Boss/Act Boss Box LvN") are language-invariant, so match on EN.
+        // Public so the 掉寶熱力圖 hover tooltip can split a cell by box kind from one source of truth.
+        public static int Classify(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return 0;
+            if (name.IndexOf("Act Boss", StringComparison.OrdinalIgnoreCase) >= 0) return 2;
+            if (name.IndexOf("Boss", StringComparison.OrdinalIgnoreCase) >= 0) return 1;
+            return 0;
+        }
 
         private static string LocalizeStage(string stage)
         {

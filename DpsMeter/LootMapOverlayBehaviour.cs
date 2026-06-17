@@ -180,6 +180,7 @@ namespace TbhDpsMeter
                 // ---- TOP grid source: F5 box pickups (BoxTracker.Events) bucketed by (day, hour) ----
                 var pickupByDay = new Dictionary<string, long[]>();
                 var pickupFirst = new Dictionary<string, DateTime>(); var pickupLast = new Dictionary<string, DateTime>();
+                var pickupKindByCell = new Dictionary<string, long[]>();   // "day|hour" -> [white, blue, act]
                 long totalPickups = 0;
                 try
                 {
@@ -192,6 +193,10 @@ namespace TbhDpsMeter
                         int hh = e.Time.Hour; if (hh < 0) hh = 0; else if (hh > 23) hh = 23;
                         if (!pickupByDay.TryGetValue(day, out var pArr)) { pArr = new long[24]; pickupByDay[day] = pArr; }
                         pArr[hh]++; totalPickups++;
+                        int kind = BoxOverlayBehaviour.Classify(e.Type); if (kind < 0 || kind > 2) kind = 0;
+                        string ck = day + "|" + hh;
+                        if (!pickupKindByCell.TryGetValue(ck, out var kArr)) { kArr = new long[3]; pickupKindByCell[ck] = kArr; }
+                        kArr[kind]++;
                         if (!pickupFirst.TryGetValue(day, out var f0) || e.Time < f0) pickupFirst[day] = e.Time;
                         if (!pickupLast.TryGetValue(day, out var l0) || e.Time > l0) pickupLast[day] = e.Time;
                     }
@@ -283,9 +288,9 @@ namespace TbhDpsMeter
 
                 var pickupStats = DayStats(days, pickupByDay, pickupFirst, pickupLast);
                 var openStats = DayStats(days, goodByDay, openFirst, openLast);
-                cy = DrawGrid(ix, cy, iw, lh, cellH, mLocal, days, dayRows, pickupByDay, Loc.G("metric_pickup"), maxPickup, 0, null, pickupStats);
+                cy = DrawGrid(ix, cy, iw, lh, cellH, mLocal, days, dayRows, pickupByDay, Loc.G("metric_pickup"), maxPickup, 0, null, pickupStats, pickupKindByCell);
                 cy += lh * 0.4f;
-                cy = DrawGrid(ix, cy, iw, lh, cellH, mLocal, days, dayRows, goodByDay, Loc.G("metric_openlog"), maxOpen, 1, openEvByCell, openStats);
+                cy = DrawGrid(ix, cy, iw, lh, cellH, mLocal, days, dayRows, goodByDay, Loc.G("metric_openlog"), maxOpen, 1, openEvByCell, openStats, null);
 
                 // ---- separator + clear-time trend chart ----
                 if (hasChart)
@@ -353,7 +358,8 @@ namespace TbhDpsMeter
         // + hour-axis ticks). Returns the y just below the grid. Records a hover tooltip into _hasTip/….
         private float DrawGrid(float ix, float cy, float iw, float lh, float cellH, Vector2 mLocal,
             List<string> days, int dayRows, Dictionary<string, long[]> data, string header, long maxVisible, int metric,
-            Dictionary<string, List<BoxOpenEvent>> evByCell, Dictionary<string, string> dayStats)
+            Dictionary<string, List<BoxOpenEvent>> evByCell, Dictionary<string, string> dayStats,
+            Dictionary<string, long[]> kindByCell)
         {
             float statW = Mathf.Max(78f, iw * 0.17f);
             GUI.Label(new Rect(ix, cy, iw - statW, lh), $"<color=#9fb4cc>{header}</color>", _dim);
@@ -389,6 +395,7 @@ namespace TbhDpsMeter
                     {
                         _hasTip = true; _tipCell = cr;
                         if (evByCell != null) _tipText = BuildOpenTip(evByCell, day, hh, shortDay);
+                        else if (kindByCell != null) _tipText = BuildPickupTip(kindByCell, day, hh, shortDay, v);
                         else _tipText = $"{shortDay} {hh:00}:00 · {v}";
                     }
                 }
@@ -400,6 +407,21 @@ namespace TbhDpsMeter
             foreach (int t in ticks)
                 GUI.Label(new Rect(gridX + t * cellW, gy, cellW * 3, lh), $"<size=9><color=#7a8390>{t}</color></size>", _tiny);
             return gy + lh;
+        }
+
+        // Top-grid (寶箱獲取) cell tooltip: "MM-DD HH:00 · total" then a per-kind breakdown
+        // (白箱 / 藍箱 / 首領), omitting zero rows. Colors match the F5 box-log panel.
+        private static string BuildPickupTip(Dictionary<string, long[]> kindByCell, string day, int hh, string shortDay, long total)
+        {
+            var sb = new StringBuilder();
+            sb.Append(shortDay).Append(' ').Append(hh.ToString("00")).Append(":00 · ").Append(total);
+            if (kindByCell.TryGetValue(day + "|" + hh, out var k) && k != null)
+            {
+                if (k[0] > 0) sb.Append("\n<color=#eaf3ee>").Append(Loc.G("box_white")).Append("</color>   ").Append(k[0]);
+                if (k[1] > 0) sb.Append("\n<color=#7FB2FF>").Append(Loc.G("box_blue")).Append("</color>   ").Append(k[1]);
+                if (k[2] > 0) sb.Append("\n<color=#FFC04D>").Append(Loc.G("box_kind_actboss")).Append("</color>   ").Append(k[2]);
+            }
+            return sb.ToString();
         }
 
         private static readonly string[] kindKeys = { "box_kind_normal", "box_kind_boss", "box_kind_actboss", "box_kind_unknown" };

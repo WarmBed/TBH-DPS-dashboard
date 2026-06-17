@@ -26,6 +26,17 @@ namespace TbhDpsMeter
         private float _scrollY;   // log-list scroll offset (snapped to whole rows)
         private float _listH;     // resizable log-list viewport height (px), from BoxOpenPanelHeight
 
+        // grade-detail drilldown: -1 = show the time log; >=0 = show that grade's item breakdown.
+        // Click a matrix grade row to enter; ◀ ▶ switch grade; ✕ / clicking the same row again returns.
+        private int _detailGrade = -1;
+        private bool _showPct;        // matrix cells: false = counts, true = percentages
+        private Rect _pctRect;
+        private readonly System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<int, Rect>> _gradeRows
+            = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<int, Rect>>();
+        private readonly System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, int>> _detailItems
+            = new System.Collections.Generic.List<System.Collections.Generic.KeyValuePair<string, int>>();
+        private Rect _detPrevRect, _detNextRect, _detBackRect;
+
         // per-grade row colors (index == grade int) — matched to the in-game grade chips
         private static readonly Color[] GradeColors = {
             new Color(0.62f,0.64f,0.68f), // 0 普通  grey
@@ -39,6 +50,11 @@ namespace TbhDpsMeter
             new Color(0.96f,0.95f,0.80f), // 8 神聖  cream
             new Color(1.00f,1.00f,1.00f), // 9 宇宙  white
         };
+
+        // this panel runs +2px over the global font sizes (it's dense — matrix + list); single source so
+        // the row height (lh) and the built styles always agree.
+        private int Fs => Plugin.FontSize.Value + 2;
+        private int Fsm => Plugin.FontSizeSmall.Value + 2;
 
         private static string Hex(Color c) => $"#{(int)(c.r*255):X2}{(int)(c.g*255):X2}{(int)(c.b*255):X2}";
 
@@ -74,7 +90,7 @@ namespace TbhDpsMeter
                 if (_visible)
                 {
                     float wd = InputCompat.WheelDelta(6);
-                    if (wd != 0f) { float lh = Plugin.FontSize.Value + 6; _scrollY -= (wd / 120f) * 3f * lh; }
+                    if (wd != 0f) { float lh = Fs + 6; _scrollY -= (wd / 120f) * 3f * lh; }
                     HandlePointer();
                 }
                 else if (_dragging) _dragging = false;
@@ -87,7 +103,7 @@ namespace TbhDpsMeter
             if (GameUiState.MenuOpen()) { if (_dragging) { _dragging = false; InputCompat.ReleaseDrag(6); } return; }
             Vector2 m = UiScale.ToLocal(InputCompat.MouseGuiPos(), _rect.x, _rect.y, _scale);
             // resize grip (bottom-right): width + scrollable-log height
-            float glh = Plugin.FontSize.Value + 6;
+            float glh = Fs + 6;
             float rw = _rect.width;
             var rr = _resize.Handle(6, m, ref rw, ref _listH,
                 360f, Mathf.Max(360f, Screen.width * 0.9f), glh * 3f, Screen.height * 0.85f, true);
@@ -98,7 +114,21 @@ namespace TbhDpsMeter
             if (InputCompat.MousePressed())
             {
                 if (_closeRect.Contains(m)) { _visible = false; return; }
-                if (_clearRect.Contains(m)) { BoxOpenTracker.ClearAll(); _scrollY = 0; return; }
+                if (_clearRect.Contains(m)) { BoxOpenTracker.ClearAll(); _scrollY = 0; _detailGrade = -1; return; }
+                if (_pctRect.Contains(m)) { _showPct = !_showPct; return; }   // matrix count <-> %
+                var st = BoxOpenTracker.Stats;
+                if (_detailGrade >= 0)
+                {
+                    if (_detPrevRect.Contains(m)) { StepDetailGrade(st, -1); return; }
+                    if (_detNextRect.Contains(m)) { StepDetailGrade(st, +1); return; }
+                    if (_detBackRect.Contains(m)) { _detailGrade = -1; _scrollY = 0; return; }
+                }
+                for (int i = 0; i < _gradeRows.Count; i++)
+                    if (_gradeRows[i].Value.Contains(m))
+                    {
+                        int g = _gradeRows[i].Key;
+                        _detailGrade = (_detailGrade == g) ? -1 : g; _scrollY = 0; return;   // toggle drilldown
+                    }
                 if (_rect.Contains(m) && InputCompat.ClaimDrag(6)) { _dragging = true; _dragOffset = m - new Vector2(_rect.x, _rect.y); }
             }
             if (_dragging)
@@ -113,7 +143,7 @@ namespace TbhDpsMeter
         {
             if (_white == null) { _white = new Texture2D(1, 1); _white.SetPixel(0, 0, Color.white); _white.Apply(); }
             if (_bgTex == null) { _bgTex = new Texture2D(1, 1); _bgTex.SetPixel(0, 0, new Color(0f, 0f, 0f, 1f)); _bgTex.Apply(); if (_box != null) _box.normal.background = _bgTex; }
-            int fs = Plugin.FontSize.Value, fsm = Plugin.FontSizeSmall.Value;
+            int fs = Fs, fsm = Fsm;
             if (_stylesReady && _builtFs == fs && _builtFsm == fsm) return;
             _builtFs = fs; _builtFsm = fsm;
             _title = new GUIStyle { fontSize = fs, fontStyle = FontStyle.Bold, richText = true }; _title.normal.textColor = new Color(1f, 0.86f, 0.35f);
@@ -142,7 +172,7 @@ namespace TbhDpsMeter
                 EnsureAssets();
                 if (!_placed) PlaceDefault();
                 var st = BoxOpenTracker.Stats;
-                int fs = Plugin.FontSize.Value; float lh = fs + 6;
+                int fs = Fs; float lh = fs + 6;
                 bool hasUnknown = st.KindTotal((int)BoxKind.Unknown) > 0;
 
                 int gradeRows = 0; for (int g = 0; g < BoxGrade.Count; g++) if (st.GradeTotal(g) > 0) gradeRows++;
@@ -162,8 +192,11 @@ namespace TbhDpsMeter
 
                 float cy = _rect.y + Pad;
                 float clearW = Mathf.Max(60f, _btn.CalcSize(new GUIContent(Loc.G("reset_all"))).x + 12f);
-                GUI.Label(new Rect(ix, cy, iw, lh), $"{Loc.G("boxopen_title")}  <size=11><color=#9fb4cc>{Loc.G("boxopen_total")} {st.Total()}</color></size>", _title);
+                GUI.Label(new Rect(ix, cy, iw, lh), $"{Loc.G("boxopen_title")}  <size=13><color=#9fb4cc>{Loc.G("boxopen_total")} {st.Total()}</color></size>", _title);
                 _clearRect = new Rect(x + w - 28 - clearW, cy - 1, clearW, lh); GUI.Button(_clearRect, Loc.G("reset_all"), _btn);
+                // matrix count/percentage toggle (left of Clear-All); highlighted when showing %
+                _pctRect = new Rect(_clearRect.x - 6 - 28, cy - 1, 28, lh);
+                GUI.Button(_pctRect, _showPct ? "<color=#FFC857>%</color>" : "%", _btn);
                 _closeRect = new Rect(x + w - 26, cy - 2, 22, lh); GUI.Button(_closeRect, "✕", _btn);
                 cy += lh;
 
@@ -171,64 +204,101 @@ namespace TbhDpsMeter
                 int nCols = KindCols.Length + (hasUnknown ? 1 : 0) + 1; // + Total
                 float gradeColW = iw * 0.26f;
                 float cellW = (iw - gradeColW) / nCols;
-                GUI.Label(new Rect(ix, cy, gradeColW, lh), $"<size=11><color=#9fb4cc>{Loc.G("boxopen_grade")}</color></size>", _dim);
+                GUI.Label(new Rect(ix, cy, gradeColW, lh), $"<size=13><color=#9fb4cc>{Loc.G("boxopen_grade")}</color></size>", _dim);
                 float hx = ix + gradeColW;
                 string[] kindKeys = { "box_kind_normal", "box_kind_boss", "box_kind_actboss" };
-                for (int c = 0; c < KindCols.Length; c++) { GUI.Label(new Rect(hx, cy, cellW, lh), $"<size=11><color=#9fb4cc>{Loc.G(kindKeys[c])}</color></size>", _cell); hx += cellW; }
-                if (hasUnknown) { GUI.Label(new Rect(hx, cy, cellW, lh), $"<size=11><color=#9fb4cc>{Loc.G("box_kind_unknown")}</color></size>", _cell); hx += cellW; }
-                GUI.Label(new Rect(hx, cy, cellW, lh), "<size=11><color=#cfd6e0>Σ</color></size>", _cell);
+                for (int c = 0; c < KindCols.Length; c++) { GUI.Label(new Rect(hx, cy, cellW, lh), $"<size=13><color=#9fb4cc>{Loc.G(kindKeys[c])}</color></size>", _cell); hx += cellW; }
+                if (hasUnknown) { GUI.Label(new Rect(hx, cy, cellW, lh), $"<size=13><color=#9fb4cc>{Loc.G("box_kind_unknown")}</color></size>", _cell); hx += cellW; }
+                GUI.Label(new Rect(hx, cy, cellW, lh), "<size=13><color=#cfd6e0>Σ</color></size>", _cell);
                 cy += lh;
                 DrawRect(ix, cy - 1, iw, 1, new Color(1, 1, 1, 0.12f));
 
+                _gradeRows.Clear();
                 for (int g = 0; g < BoxGrade.Count; g++)
                 {
                     if (st.GradeTotal(g) == 0) continue;
                     string gc = Hex(g < GradeColors.Length ? GradeColors[g] : Color.white);
-                    GUI.Label(new Rect(ix, cy, gradeColW, lh), $"<color={gc}>{Loc.G("grade_" + BoxGrade.KeyOf(g))}</color>", _label);
+                    var rowR = new Rect(ix, cy, iw, lh);
+                    _gradeRows.Add(new System.Collections.Generic.KeyValuePair<int, Rect>(g, rowR));
+                    if (_detailGrade == g) DrawRect(ix, cy, iw, lh, new Color(1f, 1f, 1f, 0.10f));  // selected highlight
+                    GUI.Label(new Rect(ix, cy, gradeColW, lh), $"<color={gc}>{(_detailGrade == g ? "▸ " : "")}{Loc.G("grade_" + BoxGrade.KeyOf(g))}</color>", _label);
                     float cx = ix + gradeColW;
                     for (int c = 0; c < KindCols.Length; c++) { DrawCell(cx, cy, cellW, lh, st, KindCols[c], g, gc); cx += cellW; }
                     if (hasUnknown) { DrawCell(cx, cy, cellW, lh, st, (int)BoxKind.Unknown, g, gc); cx += cellW; }
                     long gt = st.GradeTotal(g); double gp = st.Total() > 0 ? 100.0 * gt / st.Total() : 0;
-                    GUI.Label(new Rect(cx, cy, cellW, lh), $"<color={gc}>{gt}</color> <size=9><color=#9aa3b0>{gp:0.#}%</color></size>", _cell);
+                    string gtxt = _showPct ? $"<color={gc}>{gp:0.#}%</color>" : $"<color={gc}>{gt}</color>";
+                    GUI.Label(new Rect(cx, cy, cellW, lh), gtxt, _cell);
                     cy += lh;
                 }
                 if (gradeRows == 0) { GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#8a93a0>{Loc.G("box_empty")}</color>", _tiny); cy += lh; }
 
-                // ---- log ----
+                // if the selected grade emptied (e.g. after Clear All), drop back to the log
+                if (_detailGrade >= 0 && st.GradeTotal(_detailGrade) == 0) { _detailGrade = -1; _scrollY = 0; }
+
                 cy += lh * 0.5f;
                 DrawRect(ix, cy + lh - 1, iw, 1, new Color(1, 1, 1, 0.12f));
-                GUI.Label(new Rect(ix, cy, iw * 0.22f, lh), $"<size=11><color=#9fb4cc>{Loc.G("time_col")}</color></size>", _dim);
-                GUI.Label(new Rect(ix + iw * 0.22f, cy, iw * 0.20f, lh), $"<size=11><color=#9fb4cc>{Loc.G("boxopen_kind")}</color></size>", _dim);
-                GUI.Label(new Rect(ix + iw * 0.42f, cy, iw * 0.22f, lh), $"<size=11><color=#9fb4cc>{Loc.G("boxopen_grade")}</color></size>", _dim);
-                GUI.Label(new Rect(ix + iw * 0.64f, cy, iw * 0.36f, lh), $"<size=11><color=#9fb4cc>{Loc.G("boxopen_item")}</color></size>", _dim);
-                cy += lh;
+                float listTop;
+                int rowCount;
 
-                string[] kindShort = { "box_kind_normal", "box_kind_boss", "box_kind_actboss", "box_kind_unknown" };
-                float listTop = cy;
-                int maxFirst = Mathf.Max(0, n - visible);
-                int first = Mathf.Clamp(Mathf.RoundToInt(_scrollY / lh), 0, maxFirst);
-                _scrollY = first * lh;
-                for (int r = 0; r < visible && (first + r) < n; r++)
+                if (_detailGrade >= 0)
                 {
-                    int i = first + r;
-                    float ry = listTop + r * lh;
-                    var e = st.Log[n - 1 - i];
-                    if ((i & 1) == 1) DrawRect(ix, ry, iw, lh, new Color(1, 1, 1, 0.03f));
-                    string gc = Hex(e.Grade >= 0 && e.Grade < GradeColors.Length ? GradeColors[e.Grade] : Color.white);
-                    int kind = (e.Kind >= 0 && e.Kind < kindShort.Length) ? e.Kind : (int)BoxKind.Unknown;
-                    GUI.Label(new Rect(ix, ry, iw * 0.22f, lh), $"<color=#aeb6c2>{e.Time:HH:mm:ss}</color>", _tiny);
-                    GUI.Label(new Rect(ix + iw * 0.22f, ry, iw * 0.20f, lh), $"<color=#9aa3b0>{Loc.G(kindShort[kind])}</color>", _tiny);
-                    GUI.Label(new Rect(ix + iw * 0.42f, ry, iw * 0.22f, lh), $"<color={gc}>{Loc.G("grade_" + BoxGrade.KeyOf(e.Grade))}</color>", _tiny);
-                    GUI.Label(new Rect(ix + iw * 0.64f, ry, iw * 0.36f, lh), $"<color=#eaf3ee>{ResolveItem(e.Name)}</color>", _tiny);
+                    // ---- grade detail: distinct items × count for this grade, most-frequent first ----
+                    BuildDetail(st, _detailGrade);
+                    string gc = Hex(_detailGrade < GradeColors.Length ? GradeColors[_detailGrade] : Color.white);
+                    _detPrevRect = new Rect(ix, cy - 1, 24, lh); GUI.Button(_detPrevRect, "◀", _btn);
+                    GUI.Label(new Rect(ix + 30, cy, iw - 90, lh), $"<color={gc}>{Loc.G("grade_" + BoxGrade.KeyOf(_detailGrade))}</color> <size=13><color=#9aa3b0>×{st.GradeTotal(_detailGrade)}　{_detailItems.Count} {Loc.G("boxopen_item")}</color></size>", _label);
+                    _detNextRect = new Rect(x + w - Pad - 24 - 28, cy - 1, 24, lh); GUI.Button(_detNextRect, "▶", _btn);
+                    _detBackRect = new Rect(x + w - Pad - 22, cy - 1, 22, lh); GUI.Button(_detBackRect, "✕", _btn);
+                    cy += lh;
+
+                    rowCount = _detailItems.Count;
+                    listTop = cy;
+                    int maxF = Mathf.Max(0, rowCount - visible);
+                    int f = Mathf.Clamp(Mathf.RoundToInt(_scrollY / lh), 0, maxF);
+                    _scrollY = f * lh;
+                    for (int r = 0; r < visible && (f + r) < rowCount; r++)
+                    {
+                        int i = f + r; float ry = listTop + r * lh;
+                        var it = _detailItems[i];
+                        if ((i & 1) == 1) DrawRect(ix, ry, iw, lh, new Color(1, 1, 1, 0.03f));
+                        GUI.Label(new Rect(ix, ry, iw * 0.74f, lh), $"<color=#eaf3ee>{ResolveItem(it.Key)}</color>", _tiny);
+                        // right-aligned count, kept clear of the scrollbar track (~8px on the right edge)
+                        GUI.Label(new Rect(ix + iw * 0.74f, ry, iw * 0.26f - 8f, lh), $"<color={gc}>×{it.Value}</color>", _cell);
+                    }
+                    if (rowCount == 0) GUI.Label(new Rect(ix, listTop, iw, lh), $"<color=#8a93a0>{Loc.G("box_empty")}</color>", _tiny);
+                    DrawScrollbar(ix, listTop, iw, listAreaH, rowCount, visible, f, maxF);
                 }
-                if (n == 0) GUI.Label(new Rect(ix, listTop, iw, lh), $"<color=#8a93a0>{Loc.G("box_empty")}</color>", _tiny);
-                if (n > visible)
+                else
                 {
-                    float trackX = ix + iw - 3f;
-                    DrawRect(trackX, listTop, 3f, listAreaH, new Color(1, 1, 1, 0.08f));
-                    float thumbH = Mathf.Max(14f, listAreaH * visible / n);
-                    float thumbY = listTop + (listAreaH - thumbH) * (first / (float)maxFirst);
-                    DrawRect(trackX, thumbY, 3f, thumbH, new Color(1, 1, 1, 0.35f));
+                    // ---- time log ----
+                    _detPrevRect = _detNextRect = _detBackRect = new Rect(0, 0, 0, 0);
+                    GUI.Label(new Rect(ix, cy, iw * 0.22f, lh), $"<size=13><color=#9fb4cc>{Loc.G("time_col")}</color></size>", _dim);
+                    GUI.Label(new Rect(ix + iw * 0.22f, cy, iw * 0.20f, lh), $"<size=13><color=#9fb4cc>{Loc.G("boxopen_kind")}</color></size>", _dim);
+                    GUI.Label(new Rect(ix + iw * 0.42f, cy, iw * 0.22f, lh), $"<size=13><color=#9fb4cc>{Loc.G("boxopen_grade")}</color></size>", _dim);
+                    GUI.Label(new Rect(ix + iw * 0.64f, cy, iw * 0.36f, lh), $"<size=13><color=#9fb4cc>{Loc.G("boxopen_item")}</color></size>", _dim);
+                    cy += lh;
+
+                    string[] kindShort = { "box_kind_normal", "box_kind_boss", "box_kind_actboss", "box_kind_unknown" };
+                    listTop = cy;
+                    rowCount = n;
+                    int maxFirst = Mathf.Max(0, n - visible);
+                    int first = Mathf.Clamp(Mathf.RoundToInt(_scrollY / lh), 0, maxFirst);
+                    _scrollY = first * lh;
+                    for (int r = 0; r < visible && (first + r) < n; r++)
+                    {
+                        int i = first + r;
+                        float ry = listTop + r * lh;
+                        var e = st.Log[n - 1 - i];
+                        if ((i & 1) == 1) DrawRect(ix, ry, iw, lh, new Color(1, 1, 1, 0.03f));
+                        string gc = Hex(e.Grade >= 0 && e.Grade < GradeColors.Length ? GradeColors[e.Grade] : Color.white);
+                        int kind = (e.Kind >= 0 && e.Kind < kindShort.Length) ? e.Kind : (int)BoxKind.Unknown;
+                        GUI.Label(new Rect(ix, ry, iw * 0.22f, lh), $"<color=#aeb6c2>{e.Time:HH:mm:ss}</color>", _tiny);
+                        GUI.Label(new Rect(ix + iw * 0.22f, ry, iw * 0.20f, lh), $"<color=#9aa3b0>{Loc.G(kindShort[kind])}</color>", _tiny);
+                        GUI.Label(new Rect(ix + iw * 0.42f, ry, iw * 0.22f, lh), $"<color={gc}>{Loc.G("grade_" + BoxGrade.KeyOf(e.Grade))}</color>", _tiny);
+                        GUI.Label(new Rect(ix + iw * 0.64f, ry, iw * 0.36f, lh), $"<color=#eaf3ee>{ResolveItem(e.Name)}</color>", _tiny);
+                    }
+                    if (n == 0) GUI.Label(new Rect(ix, listTop, iw, lh), $"<color=#8a93a0>{Loc.G("box_empty")}</color>", _tiny);
+                    DrawScrollbar(ix, listTop, iw, listAreaH, n, visible, first, maxFirst);
                 }
                 _resize.DrawGrip(_white, _rect);
             }
@@ -250,15 +320,60 @@ namespace TbhDpsMeter
                 string nm = ItemNameStore.Get(id);
                 if (!string.IsNullOrEmpty(nm)) return nm;
             }
+            // not in the bundled table (e.g. an item added after this build) -> ask the live game
+            // localization facade, which knows every current item in the player's language.
+            string live = HeroProbe.GameLoc(key);
+            if (!string.IsNullOrEmpty(live) && live != key) return live;
             return key;
+        }
+
+        private void DrawScrollbar(float ix, float listTop, float iw, float listAreaH, int count, int visible, int first, int maxFirst)
+        {
+            if (count <= visible || maxFirst <= 0) return;
+            float trackX = ix + iw - 3f;
+            DrawRect(trackX, listTop, 3f, listAreaH, new Color(1, 1, 1, 0.08f));
+            float thumbH = Mathf.Max(14f, listAreaH * visible / count);
+            float thumbY = listTop + (listAreaH - thumbH) * (first / (float)maxFirst);
+            DrawRect(trackX, thumbY, 3f, thumbH, new Color(1, 1, 1, 0.35f));
+        }
+
+        // distinct item -> count for one grade, most-frequent first (from the capped open log)
+        private void BuildDetail(BoxOpenStats st, int grade)
+        {
+            _detailItems.Clear();
+            var tmp = new System.Collections.Generic.Dictionary<string, int>();
+            var log = st.Log;
+            for (int i = 0; i < log.Count; i++)
+            {
+                var e = log[i];
+                if (e == null || e.Grade != grade) continue;
+                string key = e.Name ?? "";
+                tmp.TryGetValue(key, out int c); tmp[key] = c + 1;
+            }
+            foreach (var kv in tmp) _detailItems.Add(kv);
+            _detailItems.Sort((a, b) => b.Value.CompareTo(a.Value));
+        }
+
+        // move the detail selection to the prev/next grade that has any drops (wraps around)
+        private void StepDetailGrade(BoxOpenStats st, int dir)
+        {
+            int g = _detailGrade;
+            for (int i = 0; i < BoxGrade.Count; i++)
+            {
+                g += dir;
+                if (g < 0) g = BoxGrade.Count - 1; else if (g >= BoxGrade.Count) g = 0;
+                if (st.GradeTotal(g) > 0) { _detailGrade = g; _scrollY = 0; return; }
+            }
         }
 
         private void DrawCell(float x, float y, float w, float lh, BoxOpenStats st, int kind, int grade, string gc)
         {
             long c = st.Count(kind, grade);
-            if (c == 0) { GUI.Label(new Rect(x, y, w, lh), "<size=9><color=#5a626e>·</color></size>", _cell); return; }
-            double pct = st.Percent(kind, grade);
-            GUI.Label(new Rect(x, y, w, lh), $"<color={gc}>{c}</color> <size=9><color=#9aa3b0>{pct:0.#}%</color></size>", _cell);
+            if (c == 0) { GUI.Label(new Rect(x, y, w, lh), "<size=11><color=#5a626e>·</color></size>", _cell); return; }
+            string txt = _showPct
+                ? $"<color={gc}>{st.Percent(kind, grade):0.#}%</color>"
+                : $"<color={gc}>{c}</color>";
+            GUI.Label(new Rect(x, y, w, lh), txt, _cell);
         }
     }
 }
