@@ -380,9 +380,9 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(ix + 62, cy, iw - 200, lh), $"<size=11>{current.Title}  {_runIndex + 1}/{group.Count}</size>", _dim);
                 _pinRect = new Rect(x + w - Pad - 64, cy - 1, 64, lh);
                 GUI.Button(_pinRect, curPinned ? "📌" + Loc.G("pinned") : Loc.G("set_baseline"), _btn);
-                // delete just this run (e.g. an AFK/merged record); left of the pin button
-                _delRect = new Rect(x + w - Pad - 64 - 30, cy - 1, 26, lh);
-                GUI.Button(_delRect, "🗑", _btn);
+                // delete just this run (e.g. an AFK/merged record); icon + label, left of the pin button
+                _delRect = new Rect(x + w - Pad - 64 - 6 - 64, cy - 1, 64, lh);
+                GUI.Button(_delRect, "🗑 " + Loc.G("delete_run"), _btn);
                 cy += lh;
 
                 // character tabs

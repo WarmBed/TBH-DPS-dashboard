@@ -150,6 +150,7 @@ namespace TbhDpsMeter
             { "baseline",       new[] { "基準", "Baseline", "基準", "基准", "Base" } },
             { "this_run",       new[] { "這場", "This", "この回", "这场", "Esta" } },
             { "set_baseline",   new[] { "設為基準", "Set base", "基準に設定", "设为基准", "Fijar base" } },
+            { "delete_run",     new[] { "刪除", "Delete", "削除", "删除", "Eliminar" } },
             { "pinned",         new[] { "已釘選", "Pinned", "固定中", "已钉选", "Fijado" } },
             { "active_time",    new[] { "有效輸出", "Active", "有効出力", "有效输出", "Activo" } },
             { "idle_time",      new[] { "停輸出", "Idle", "停止", "停输出", "Inactivo" } },
