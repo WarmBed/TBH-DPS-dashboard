@@ -163,6 +163,7 @@ namespace TbhDpsMeter
             // gear-score panel
             { "gearscore_title", new[] { "裝備評分", "Gear Score", "装備スコア", "装备评分", "Puntuación" } },
             { "gearscore_empty", new[] { "找不到角色", "No characters found", "キャラ未検出", "找不到角色", "Sin personajes" } },
+            { "gearscore_all",  new[] { "全部", "All", "すべて", "全部", "Todos" } },
             { "mode_simple",    new[] { "簡易", "Simple", "簡易", "简易", "Simple" } },
             { "mode_detailed",  new[] { "詳細", "Detailed", "詳細", "详细", "Detalle" } },
             { "grade",          new[] { "稀有度", "Rarity", "レア度", "稀有度", "Rareza" } },
