@@ -155,7 +155,10 @@ namespace TbhDpsMeter
                 // ---- fixed-height layout: header + summary + tabs, then capped scroll viewport ----
                 float headerBlock = Pad + lh /*title*/ + lh /*summary*/ + lh /*tabs*/;
                 float maxPanelH = Screen.height * 0.88f / Mathf.Max(0.3f, UiScale.User);
-                float maxBodyH = Mathf.Max(lh * 4f, maxPanelH - headerBlock - Pad);
+                // cap the viewport to ~16 rows so a long list scrolls inside a compact panel rather than
+                // stretching the whole panel down the screen.
+                float maxBodyH = Mathf.Min(maxPanelH - headerBlock - Pad, lh * 16f);
+                maxBodyH = Mathf.Max(lh * 4f, maxBodyH);
                 float bodyH = Mathf.Min(contentH, maxBodyH);
                 _rect.height = headerBlock + bodyH + Pad;
                 _scale = UiScale.Fit(_rect.width, _rect.height);
@@ -247,19 +250,25 @@ namespace TbhDpsMeter
             var prev = GUI.color; GUI.color = c; GUI.DrawTexture(new Rect(rx, ry, rw, rh), _white); GUI.color = prev;
         }
 
-        // localize the broad category buckets; gear subtypes (SWORD/RING…) pass through as their token.
+        // localize the type bucket: broad category (type_*) or gear subtype (gtype_*). Loc.G returns the key
+        // itself when missing, so an unrecognised token falls back to the raw token rather than "gtype_XYZ".
         private static string TypeLabel(string token)
         {
             switch (token)
             {
                 case "GEAR": case "MATERIAL": case "STAGEBOX": case "UNKNOWN": return Loc.G("type_" + token);
-                default: return token;
             }
+            string k = "gtype_" + token, s = Loc.G(k);
+            return s == k ? token : s;
         }
 
         // grade -> localized display name; "" / unknown -> the "other" bucket label.
         private static string GradeName(string grade)
-            => string.IsNullOrEmpty(grade) ? Loc.G("type_UNKNOWN") : grade;
+        {
+            if (string.IsNullOrEmpty(grade)) return Loc.G("type_UNKNOWN");
+            string k = "grade_" + grade.ToUpperInvariant(), s = Loc.G(k);
+            return s == k ? grade : s;
+        }
 
         private static string GradeColor(string grade)
         {
