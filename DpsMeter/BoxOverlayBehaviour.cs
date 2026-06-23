@@ -254,8 +254,12 @@ namespace TbhDpsMeter
                     if (hasCustom) { _clearSndRect = new Rect(ix + iw - clrW, cy, clrW, lh - 2); GUI.Button(_clearSndRect, "✕", _btn); }
                     else _clearSndRect = new Rect();
                     string nm = hasCustom ? System.IO.Path.GetFileName(cur) : Loc.G("snd_builtin");
+                    string sndErr = BoxSound.LastError;
+                    bool sndBad = hasCustom && !string.IsNullOrEmpty(sndErr);   // decode failed -> show why, in red
                     float nameW = Mathf.Max(40f, _pickRect.x - (ix + 54f) - 6f);
-                    GUI.Label(new Rect(ix + 54, cy, nameW, lh), $"<size=11><color=#cdd5df>{nm}</color></size>", _tiny);
+                    GUI.Label(new Rect(ix + 54, cy, nameW, lh),
+                        sndBad ? $"<size=11><color=#ff8a8a>{nm} — {sndErr}</color></size>"
+                               : $"<size=11><color=#cdd5df>{nm}</color></size>", _tiny);
                     cy += lh;
                 }
                 // per-stage counts

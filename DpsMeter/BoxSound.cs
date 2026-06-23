@@ -20,6 +20,9 @@ namespace TbhDpsMeter
         /// <summary>Set by the file picker (background thread); the F5 behaviour applies it on the main thread.</summary>
         public static volatile string PendingCustomPath;
 
+        /// <summary>Why the configured custom .wav couldn't be loaded (shown in the F5 panel), or null when fine.</summary>
+        public static volatile string LastError;
+
         /// <summary>Wire up the AudioSource (call once, on the main thread, from a MonoBehaviour).
         /// Builds the built-in beep and tries to load the custom .wav if one is configured.</summary>
         public static void Init(AudioSource src)
@@ -47,15 +50,16 @@ namespace TbhDpsMeter
         public static void ReloadCustom()
         {
             _custom = null;
+            LastError = null;
             try
             {
                 string path = Plugin.BoxSoundFile?.Value;
                 if (string.IsNullOrEmpty(path)) return;
-                if (!File.Exists(path)) { Plugin.Logger?.LogWarning("[box] sound file not found: " + path); return; }
-                _custom = LoadWav(path);
+                if (!File.Exists(path)) { LastError = "file not found"; Plugin.Logger?.LogWarning("[box] sound file not found: " + path); return; }
+                _custom = LoadWav(path);   // sets LastError on a decode failure
                 if (_custom != null) Plugin.Logger?.LogInfo("[box] custom sound loaded: " + path);
             }
-            catch (Exception e) { Plugin.Logger?.LogWarning("[box] custom sound load failed: " + e.Message); }
+            catch (Exception e) { LastError = e.Message; Plugin.Logger?.LogWarning("[box] custom sound load failed: " + e.Message); }
         }
 
         /// <summary>Play the pickup sound at the configured volume (no-op when muted).</summary>
@@ -113,52 +117,25 @@ namespace TbhDpsMeter
             return clip;
         }
 
-        // --- minimal WAV loader (PCM 8/16/32-bit + IEEE float) --------------
+        // --- WAV → AudioClip ------------------------------------------------
+        // The byte→float decode lives in the Unity-free WavDecoder (unit-tested in TrackerTests for
+        // 16/24/32-bit PCM, 32-bit float, and WAVE_FORMAT_EXTENSIBLE); here we only wrap it in a clip.
 
         private static AudioClip LoadWav(string path)
         {
             byte[] b = File.ReadAllBytes(path);
-            if (b.Length < 44) return null;
-            if (b[0] != 'R' || b[1] != 'I' || b[2] != 'F' || b[3] != 'F') return null;
-
-            int channels = 1, rate = 44100, bits = 16, format = 1;
-            int dataPos = -1, dataLen = 0;
-            int p = 12;
-            while (p + 8 <= b.Length)
+            float[] samples = WavDecoder.Decode(b, out int channels, out int rate, out string error);
+            if (samples == null || samples.Length == 0)
             {
-                string id = "" + (char)b[p] + (char)b[p + 1] + (char)b[p + 2] + (char)b[p + 3];
-                int sz = BitConverter.ToInt32(b, p + 4);
-                if (id == "fmt ")
-                {
-                    format = BitConverter.ToInt16(b, p + 8);
-                    channels = BitConverter.ToInt16(b, p + 10);
-                    rate = BitConverter.ToInt32(b, p + 12);
-                    bits = BitConverter.ToInt16(b, p + 22);
-                }
-                else if (id == "data") { dataPos = p + 8; dataLen = sz; break; }
-                p += 8 + sz + (sz & 1);
+                LastError = error ?? "could not decode WAV";
+                Plugin.Logger?.LogWarning("[box] custom sound rejected: " + LastError + " (" + path + ")");
+                return null;
             }
-            if (dataPos < 0 || channels < 1) return null;
-            if (dataPos + dataLen > b.Length) dataLen = b.Length - dataPos;
-
-            int bytesPer = bits / 8;
-            if (bytesPer < 1) return null;
-            int total = dataLen / bytesPer;          // samples across all channels
-            var f = new Il2CppStructArray<float>(total);
-            for (int i = 0; i < total; i++)
-            {
-                int o = dataPos + i * bytesPer;
-                float s;
-                if (format == 3 && bits == 32) s = BitConverter.ToSingle(b, o);
-                else if (bits == 16) s = BitConverter.ToInt16(b, o) / 32768f;
-                else if (bits == 32) s = BitConverter.ToInt32(b, o) / 2147483648f;
-                else if (bits == 8) s = (b[o] - 128) / 128f;
-                else s = 0f;
-                f[i] = s;
-            }
-            int frames = total / channels;
+            var data = new Il2CppStructArray<float>(samples.Length);
+            for (int i = 0; i < samples.Length; i++) data[i] = samples[i];
+            int frames = samples.Length / Math.Max(1, channels);
             var clip = AudioClip.Create("box_custom", frames, channels, rate, false);
-            clip.SetData(f, 0);
+            clip.SetData(data, 0);
             return clip;
         }
 

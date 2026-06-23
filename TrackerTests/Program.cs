@@ -137,6 +137,7 @@ class Tests
         SerializerTests();
         JsonTests();
         FarmTests();
+        WavDecoderTests();
 
         // ===== BoxOpenStats: aggregation + percentages =====
         var bo = new BoxOpenStats();
@@ -612,4 +613,97 @@ class Tests
     }
 
     static EfficiencyRow R2(System.Collections.Generic.List<EfficiencyRow> rows, string id) => rows.Find(x => x.Stage.StageId == id);
+
+    // ================= WavDecoder =================
+    // Build a one-channel WAV with the given container so we can prove the decoder handles the
+    // real-world formats users actually export (16/24/32-bit PCM, 32-bit float, and the
+    // WAVE_FORMAT_EXTENSIBLE wrapper many DAWs emit).
+    static byte[] BuildWav(int bits, int fmtCode, bool extensible, float[] s)
+    {
+        var data = new System.IO.MemoryStream();
+        var dw = new System.IO.BinaryWriter(data);
+        foreach (var x in s)
+        {
+            if (bits == 16) dw.Write((short)Math.Max(-32768, Math.Min(32767, (int)(x * 32767))));
+            else if (bits == 24)
+            {
+                int v = Math.Max(-8388608, Math.Min(8388607, (int)(x * 8388607)));
+                dw.Write((byte)(v & 0xFF)); dw.Write((byte)((v >> 8) & 0xFF)); dw.Write((byte)((v >> 16) & 0xFF));
+            }
+            else if (bits == 32 && fmtCode == 3) dw.Write(x);                         // IEEE float
+            else if (bits == 32 && fmtCode == 1) dw.Write((int)(x * 2147483647.0));   // 32-bit PCM int
+        }
+        byte[] dataBytes = data.ToArray();
+        int ch = 1, rate = 44100, blockAlign = ch * bits / 8, byteRate = rate * blockAlign;
+
+        var fmt = new System.IO.MemoryStream();
+        var fw = new System.IO.BinaryWriter(fmt);
+        if (extensible)
+        {
+            fw.Write((ushort)0xFFFE); fw.Write((ushort)ch); fw.Write((uint)rate); fw.Write((uint)byteRate);
+            fw.Write((ushort)blockAlign); fw.Write((ushort)bits);
+            fw.Write((ushort)22); fw.Write((ushort)bits); fw.Write((uint)0);          // cbSize, validBits, channelMask
+            fw.Write((ushort)fmtCode);                                                // SubFormat: real tag
+            fw.Write(new byte[] { 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xAA, 0, 0x38, 0x9B, 0x71 });
+        }
+        else
+        {
+            fw.Write((ushort)fmtCode); fw.Write((ushort)ch); fw.Write((uint)rate); fw.Write((uint)byteRate);
+            fw.Write((ushort)blockAlign); fw.Write((ushort)bits);
+        }
+        byte[] fmtBytes = fmt.ToArray();
+
+        var ms = new System.IO.MemoryStream();
+        var w = new System.IO.BinaryWriter(ms);
+        w.Write(new byte[] { (byte)'R', (byte)'I', (byte)'F', (byte)'F' });
+        w.Write((uint)(4 + (8 + fmtBytes.Length) + (8 + dataBytes.Length)));
+        w.Write(new byte[] { (byte)'W', (byte)'A', (byte)'V', (byte)'E' });
+        w.Write(new byte[] { (byte)'f', (byte)'m', (byte)'t', (byte)' ' }); w.Write((uint)fmtBytes.Length); w.Write(fmtBytes);
+        w.Write(new byte[] { (byte)'d', (byte)'a', (byte)'t', (byte)'a' }); w.Write((uint)dataBytes.Length); w.Write(dataBytes);
+        return ms.ToArray();
+    }
+
+    static double Rms(float[] dec, float[] src)
+    {
+        if (dec == null || dec.Length == 0) return 1.0;
+        int n = Math.Min(dec.Length, src.Length); double e = 0;
+        for (int i = 0; i < n; i++) { double d = dec[i] - src[i]; e += d * d; }
+        return Math.Sqrt(e / n);
+    }
+
+    static void WavDecoderTests()
+    {
+        Console.WriteLine("\n-- WavDecoder --");
+        int N = 2048;
+        var sine = new float[N];
+        for (int i = 0; i < N; i++) sine[i] = 0.9f * (float)Math.Sin(2 * Math.PI * 440 * i / 44100);
+
+        // every format a user could realistically feed the box-pickup sound must round-trip cleanly
+        void Ok(string name, int bits, int fmt, bool ext)
+        {
+            var dec = WavDecoder.Decode(BuildWav(bits, fmt, ext, sine), out _, out _, out var err);
+            double rms = Rms(dec, sine);
+            Check("[wav] " + name + " decodes correctly", dec != null && rms < 0.02, dec == null ? ("null: " + err) : ("rms=" + rms.ToString("0.000")));
+        }
+        Ok("16-bit PCM", 16, 1, false);
+        Ok("24-bit PCM", 24, 1, false);                  // was SILENT before the fix
+        Ok("32-bit float", 32, 3, false);
+        Ok("32-bit float EXTENSIBLE", 32, 3, true);       // was NOISE before the fix
+        Ok("16-bit PCM EXTENSIBLE", 16, 1, true);
+        Ok("24-bit PCM EXTENSIBLE", 24, 1, true);         // was SILENT before the fix
+        Ok("32-bit PCM int", 32, 1, false);
+
+        // unsupported / non-WAV input must be REJECTED (null + reason), not silently mis-decoded
+        var notwav = WavDecoder.Decode(new byte[] { (byte)'I', (byte)'D', (byte)'3', 4, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8 }, out _, out _, out var e1);
+        Check("[wav] non-WAV rejected with reason", notwav == null && !string.IsNullOrEmpty(e1), e1);
+
+        // a compressed codec (e.g. ADPCM/MP3-in-WAV) must be rejected, not read as garbage PCM
+        var adpcm = BuildWav(16, 2, false, sine);         // claim format tag 2 (ADPCM)
+        var decAd = WavDecoder.Decode(adpcm, out _, out _, out var e2);
+        Check("[wav] compressed codec rejected", decAd == null && !string.IsNullOrEmpty(e2), decAd == null ? e2 : "decoded garbage");
+
+        // a real decoded clip must not be empty
+        var d16 = WavDecoder.Decode(BuildWav(16, 1, false, sine), out _, out _, out _);
+        Check("[wav] decoded sample count matches", d16 != null && d16.Length == N, d16 == null ? "null" : d16.Length.ToString());
+    }
 }
