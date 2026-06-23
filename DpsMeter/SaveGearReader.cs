@@ -170,6 +170,104 @@ namespace TbhDpsMeter
             return result;
         }
 
+        /// <summary>Read the backpack + warehouse + trading-stash slot grids and return aggregate counts of
+        /// everything held there (NOT equipped gear). Each grid is a list of {Index, ItemUniqueId, IsUnLock}
+        /// slots; an occupied slot (ItemUniqueId != 0) is joined to itemSaveDatas for its ItemKey, then
+        /// bucketed by grade/category via the bundled meta. Returns an empty result on any failure.</summary>
+        public static InventoryStats ReadInventory()
+        {
+            var stats = new InventoryStats();
+            try
+            {
+                string path = Path.Combine(UnityEngine.Application.persistentDataPath, "SaveFile_Live.es3");
+                if (!File.Exists(path)) return stats;
+                string json = Decrypt(File.ReadAllBytes(path), Password);
+                if (string.IsNullOrEmpty(json)) return stats;
+
+                var outer = Json.Parse(json);
+                string inas = Json.Str(Json.Get(Json.Get(outer, "PlayerSaveData"), "value"));
+                var inner = string.IsNullOrEmpty(inas) ? outer : Json.Parse(inas);
+
+                // uid -> ItemKey from the item-instance table
+                var keyByUid = new Dictionary<long, int>();
+                var items = FindArray(inner, "itemSaveDatas");
+                if (items != null)
+                    foreach (var it in items)
+                    {
+                        long uid = Json.Long(Json.Get(it, "UniqueId"));
+                        if (uid != 0) keyByUid[uid] = (int)Json.Num(Json.Get(it, "ItemKey"));
+                    }
+
+                var counts = new Dictionary<int, int>();   // ItemKey -> held count (merged across areas)
+                void Tally(string arrayKey, ref int used, ref int total)
+                {
+                    var arr = FindArray(inner, arrayKey);
+                    if (arr == null) return;
+                    total = arr.Count;
+                    foreach (var slot in arr)
+                    {
+                        long uid = Json.Long(Json.Get(slot, "ItemUniqueId"));
+                        if (uid == 0) continue;                       // empty slot
+                        used++;
+                        if (!keyByUid.TryGetValue(uid, out int key)) continue;
+                        counts.TryGetValue(key, out int c); counts[key] = c + 1;
+                    }
+                }
+                Tally("inventorySaveDatas", ref stats.BagUsed, ref stats.BagTotal);
+                Tally("stashSaveDatas", ref stats.StashUsed, ref stats.StashTotal);
+                Tally("tradingStashSaveDatas", ref stats.TradeUsed, ref stats.TradeTotal);
+                stats.Total = stats.BagUsed + stats.StashUsed + stats.TradeUsed;
+
+                // build merged rows + grade/type buckets
+                var byGrade = new Dictionary<string, int>();
+                var byType = new Dictionary<string, int>();
+                foreach (var kv in counts)
+                {
+                    int key = kv.Key, n = kv.Value;
+                    string grade = ItemMetaStore.Grade(key);
+                    string cat = ItemMetaStore.Category(key);
+                    string typeLabel = cat == "GEAR" ? ItemMetaStore.GearType(key) : cat;
+                    if (string.IsNullOrEmpty(typeLabel)) typeLabel = "UNKNOWN";
+                    string name = ItemNameStore.Get(key);
+                    if (string.IsNullOrEmpty(name)) name = "item" + key;
+                    stats.Items.Add(new ItemCount { ItemKey = key, Count = n, Name = name, Grade = grade, Type = typeLabel });
+                    byGrade.TryGetValue(grade ?? "", out int g); byGrade[grade ?? ""] = g + n;
+                    byType.TryGetValue(typeLabel, out int t); byType[typeLabel] = t + n;
+                }
+                stats.Items.Sort((a, b) =>
+                {
+                    int r = GradeRank(b.Grade) - GradeRank(a.Grade);     // best rarity first
+                    if (r != 0) return r;
+                    return string.CompareOrdinal(a.Name, b.Name);
+                });
+                foreach (var kv in byGrade) stats.ByGrade.Add(kv);
+                stats.ByGrade.Sort((a, b) => GradeRank(b.Key) - GradeRank(a.Key));
+                foreach (var kv in byType) stats.ByType.Add(kv);
+                stats.ByType.Sort((a, b) => b.Value - a.Value);
+            }
+            catch (Exception e) { Plugin.Logger?.LogWarning("SaveGearReader.ReadInventory: " + e.Message); }
+            return stats;
+        }
+
+        /// <summary>Rarity ordinal for sorting (higher = rarer). Unknown -> -1.</summary>
+        public static int GradeRank(string grade)
+        {
+            switch ((grade ?? "").ToUpperInvariant())
+            {
+                case "COMMON": return 0;
+                case "UNCOMMON": return 1;
+                case "RARE": return 2;
+                case "LEGENDARY": return 3;
+                case "IMMORTAL": return 4;
+                case "ARCANA": return 5;
+                case "BEYOND": return 6;
+                case "CELESTIAL": return 7;
+                case "DIVINE": return 8;
+                case "COSMIC": return 9;
+                default: return -1;
+            }
+        }
+
         private static string Decrypt(byte[] data, string password)
         {
             if (data == null || data.Length <= 16) return null;

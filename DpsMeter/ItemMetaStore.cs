@@ -47,5 +47,16 @@ namespace TbhDpsMeter
         /// <summary>Gear slot/type (e.g. "BOW", "HELMET", "RING"); "" if unknown. Used to bucket the item's
         /// base value into the attack/defence split.</summary>
         public static string GearType(int itemKey) => Json.Str(Json.Get(Entry(itemKey), "t")) ?? "";
+
+        /// <summary>Broad category: "GEAR" for equipment, else the wiki `type` (e.g. "MATERIAL", "STAGEBOX").
+        /// Non-gear entries carry an explicit "c" field; gear entries don't, so a known entry without "c" is
+        /// gear. Empty string if the item key is unknown to the table.</summary>
+        public static string Category(int itemKey)
+        {
+            var e = Entry(itemKey);
+            if (e == null) return "";
+            string c = Json.Str(Json.Get(e, "c"));
+            return !string.IsNullOrEmpty(c) ? c : "GEAR";
+        }
     }
 }
