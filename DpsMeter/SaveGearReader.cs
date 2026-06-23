@@ -199,24 +199,34 @@ namespace TbhDpsMeter
                     }
 
                 var counts = new Dictionary<int, int>();   // ItemKey -> held count (merged across areas)
+                const int TabSize = 49;                    // slots per warehouse/bag page
                 void Tally(string arrayKey, ref int used, ref int total)
                 {
                     var arr = FindArray(inner, arrayKey);
                     if (arr == null) return;
+                    int unlocked = 0, lastOcc = -1;
                     foreach (var slot in arr)
                     {
-                        // a slot the player has bought: inventory spells it "IsUnlock", stash/trade "IsUnLock".
-                        // Count unlocked slots (not the raw array length) so the denominator is the real
-                        // capacity, not capacity-incl-unpurchased tabs.
-                        bool unlocked = Json.Get(slot, "IsUnlock") is bool a ? a
-                                      : Json.Get(slot, "IsUnLock") is bool b && b;
-                        if (unlocked) total++;
+                        // a bought slot: inventory spells the flag "IsUnlock", stash/trade "IsUnLock".
+                        bool ul = Json.Get(slot, "IsUnlock") is bool a ? a
+                                : Json.Get(slot, "IsUnLock") is bool b && b;
+                        if (ul) unlocked++;
                         long uid = Json.Long(Json.Get(slot, "ItemUniqueId"));
                         if (uid == 0) continue;                       // empty slot
                         used++;
+                        int idx = (int)Json.Num(Json.Get(slot, "Index"));
+                        if (idx > lastOcc) lastOcc = idx;
                         if (!keyByUid.TryGetValue(uid, out int key)) continue;
                         counts.TryGetValue(key, out int c); counts[key] = c + 1;
                     }
+                    // Capacity = the real number of slots the player can use. The stash pre-allocates ALL
+                    // tabs with IsUnLock=true, so when every slot is flagged unlocked that flag is useless —
+                    // fall back to the slots up to the last occupied tab (trailing all-empty tabs aren't
+                    // "added" yet). The bag uses a genuine partial unlock, so trust the flag there.
+                    if (arr.Count > 0 && unlocked == arr.Count)
+                        total = System.Math.Min(((lastOcc / TabSize) + 1) * TabSize, arr.Count);
+                    else
+                        total = unlocked;
                 }
                 Tally("inventorySaveDatas", ref stats.BagUsed, ref stats.BagTotal);
                 Tally("stashSaveDatas", ref stats.StashUsed, ref stats.StashTotal);
