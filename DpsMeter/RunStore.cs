@@ -8,7 +8,10 @@ namespace TbhDpsMeter
     /// Serialization lives in RunSerializer (pure C#, unit-tested); this class is just file I/O.</summary>
     public static class RunStore
     {
-        private const int MaxRuns = 60;
+        // Retention is PER STAGE (see RunRetention): keep the newest runs of each stage so farming one
+        // stage never evicts another stage's comparison history. A global ceiling bounds total disk/memory.
+        private const int PerStageCap = 60;
+        private const int GlobalCap = 400;
         private static string Dir => Path.Combine(BepInEx.Paths.ConfigPath, "dpsmeter_runs");
 
         /// <summary>Bumped whenever the saved set changes (save / delete), so open UIs can auto-refresh.</summary>
@@ -32,10 +35,29 @@ namespace TbhDpsMeter
             try
             {
                 var files = new List<string>(Directory.GetFiles(Dir, "run_*.txt"));
-                files.Sort();
-                while (files.Count > MaxRuns) { try { File.Delete(files[0]); } catch { } files.RemoveAt(0); }
+                files.Sort();   // filename embeds yyyyMMdd_HHmmss_fff -> chronological (oldest first)
+                var entries = new List<(string path, string stage)>(files.Count);
+                foreach (var f in files) entries.Add((f, ReadStageId(f)));
+                foreach (var path in RunRetention.SelectExpired(entries, PerStageCap, GlobalCap))
+                    try { File.Delete(path); } catch { }
             }
             catch { }
+        }
+
+        /// <summary>Cheap stage-id read for pruning: the "stageid=" line is near the top of the file,
+        /// so stop as soon as we see it (or the first character block). Empty if unreadable.</summary>
+        private static string ReadStageId(string file)
+        {
+            try
+            {
+                foreach (var line in File.ReadLines(file))
+                {
+                    if (line.StartsWith("stageid=")) return line.Substring(8).Trim();
+                    if (line.StartsWith("char=") || line.StartsWith("snap=")) break;   // past the header
+                }
+            }
+            catch { }
+            return "";
         }
 
         /// <summary>Delete all saved run records. Returns the number of files removed.</summary>

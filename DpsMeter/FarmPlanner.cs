@@ -115,6 +115,18 @@ namespace TbhDpsMeter
             return sb.ToString();
         }
 
+        /// <summary>Heroes a run's exp should be divided by. Only heroes that actually EARNED exp count:
+        /// a rostered-but-benched party member (ExpGained == 0, e.g. an un-fielded priest) must not
+        /// dilute exp/hero. Falls back to the full party size for legacy runs that captured no per-hero
+        /// exp at all (even-split, the old behaviour).</summary>
+        public static int EffectivePartyForExp(RunRecord r)
+        {
+            if (r == null || r.Party == null) return 0;
+            int earners = 0;
+            foreach (var s in r.Party) if (s != null && s.ExpGained > 0) earners++;
+            return earners > 0 ? earners : r.Party.Count;
+        }
+
         /// <summary>EXP retention 0..1 at a stage level for a hero level — the wiki's "保留經驗值" curve.
         /// Reverse-engineered from the wiki: full near your level, quadratic falloff, then exponential
         /// decay to a 1% floor as the level gap grows. heroLevel/stageLevel ≤ 0 ⇒ no penalty (1).</summary>
@@ -161,7 +173,7 @@ namespace TbhDpsMeter
                 if (r == null || string.IsNullOrEmpty(r.StageId) || r.Duration <= 0.01) continue;
                 if (!byId.TryGetValue(r.StageId, out var st)) continue;
                 if (st.ExpectedGold <= 0 || r.GoldGained <= 0) continue;   // gold must be sane
-                int party = r.Party != null ? r.Party.Count : 0;
+                int party = EffectivePartyForExp(r);   // exp-earning heroes only — benched members don't dilute
                 bool expValid = party > 0 && st.ExpectedEXP > 0 && r.ExpGained > 0;
                 double expPerHero = expValid ? r.ExpGained / party : 0;
                 int heroLevel = r.RepLevel > 0 ? r.RepLevel : fallbackHeroLevel;

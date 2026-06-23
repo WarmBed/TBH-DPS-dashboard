@@ -137,6 +137,8 @@ class Tests
         SerializerTests();
         JsonTests();
         FarmTests();
+        FarmDivisorTests();
+        RunRetentionTests();
         WavDecoderTests();
 
         // ===== BoxOpenStats: aggregation + percentages =====
@@ -614,17 +616,70 @@ class Tests
 
     static EfficiencyRow R2(System.Collections.Generic.List<EfficiencyRow> rows, string id) => rows.Find(x => x.Stage.StageId == id);
 
+    // ================= Farm exp divisor (benched-hero dilution) =================
+    static void FarmDivisorTests()
+    {
+        Console.WriteLine("\n-- Farm exp divisor --");
+        // benched party members earn no exp and must NOT dilute exp/hero: priest+mage benched, ranger fielded
+        var r = new RunRecord { StageId = "3-10 TORMENT", Duration = 8f, ExpGained = 10240 };
+        r.Party.Add(new CharacterSnapshot { Captured = true, Character = "401" });                  // priest, ExpGained 0
+        r.Party.Add(new CharacterSnapshot { Captured = true, Character = "301" });                  // mage,   ExpGained 0
+        r.Party.Add(new CharacterSnapshot { Captured = true, Character = "201", ExpGained = 10240 }); // ranger fielded
+        Check("[farm] divisor = exp-earning heroes (1, not 3)", FarmPlanner.EffectivePartyForExp(r) == 1, FarmPlanner.EffectivePartyForExp(r));
+
+        var r2 = new RunRecord { ExpGained = 300 };
+        r2.Party.Add(new CharacterSnapshot { Captured = true, Character = "101", ExpGained = 100 });
+        r2.Party.Add(new CharacterSnapshot { Captured = true, Character = "201", ExpGained = 100 });
+        r2.Party.Add(new CharacterSnapshot { Captured = true, Character = "301", ExpGained = 100 });
+        Check("[farm] all-fielded divisor = 3", FarmPlanner.EffectivePartyForExp(r2) == 3, FarmPlanner.EffectivePartyForExp(r2));
+
+        // legacy run: no per-hero exp captured -> fall back to full party (even split, old behaviour)
+        var r3 = new RunRecord { ExpGained = 300 };
+        r3.Party.Add(new CharacterSnapshot { Captured = true, Character = "101" });
+        r3.Party.Add(new CharacterSnapshot { Captured = true, Character = "201" });
+        Check("[farm] legacy no-per-hero-exp falls back to party count (2)", FarmPlanner.EffectivePartyForExp(r3) == 2, FarmPlanner.EffectivePartyForExp(r3));
+
+        Check("[farm] empty party divisor 0", FarmPlanner.EffectivePartyForExp(new RunRecord()) == 0, FarmPlanner.EffectivePartyForExp(new RunRecord()));
+    }
+
+    // ================= RunRetention (per-stage history) =================
+    static void RunRetentionTests()
+    {
+        Console.WriteLine("\n-- RunRetention --");
+        // two stages farmed in alternation; per-stage cap must NOT let one stage evict the other's history
+        var chrono = new System.Collections.Generic.List<(string, string)>();
+        for (int i = 0; i < 50; i++) { chrono.Add(("A" + i, "3-6")); chrono.Add(("B" + i, "4-1")); }
+        var del = RunRetention.SelectExpired(chrono, 30, 1000);
+        var dset = new System.Collections.Generic.HashSet<string>(del);
+        Check("[store] deletes oldest 20 of each stage (40)", del.Count == 40, del.Count);
+        Check("[store] keeps newest of stage A (A49)", !dset.Contains("A49"), "A49 deleted");
+        Check("[store] keeps newest of stage B (B49)", !dset.Contains("B49"), "B49 deleted");
+        Check("[store] per-stage: A20/A30 survive despite B volume", !dset.Contains("A20") && !dset.Contains("A30"), "A recent deleted");
+        Check("[store] deletes A0 (oldest beyond cap)", dset.Contains("A0"), "A0 kept");
+
+        // under cap -> nothing deleted
+        var few = new System.Collections.Generic.List<(string, string)> { ("a", "3-6"), ("b", "3-6"), ("c", "4-1") };
+        Check("[store] under cap deletes nothing", RunRetention.SelectExpired(few, 30, 1000).Count == 0, RunRetention.SelectExpired(few, 30, 1000).Count);
+
+        // global ceiling trims the globally-oldest survivors (5 stages x 30 = 150, cap 100 -> 100 kept)
+        var many = new System.Collections.Generic.List<(string, string)>();
+        for (int s = 0; s < 5; s++) for (int i = 0; i < 30; i++) many.Add(("s" + s + "_" + i, "stage" + s));
+        var delG = RunRetention.SelectExpired(many, 30, 100);
+        Check("[store] global ceiling keeps exactly 100", many.Count - delG.Count == 100, many.Count - delG.Count);
+    }
+
     // ================= WavDecoder =================
     // Build a one-channel WAV with the given container so we can prove the decoder handles the
     // real-world formats users actually export (16/24/32-bit PCM, 32-bit float, and the
     // WAVE_FORMAT_EXTENSIBLE wrapper many DAWs emit).
-    static byte[] BuildWav(int bits, int fmtCode, bool extensible, float[] s)
+    static byte[] BuildWav(int bits, int fmtCode, bool extensible, float[] s, int channels = 1)
     {
         var data = new System.IO.MemoryStream();
         var dw = new System.IO.BinaryWriter(data);
         foreach (var x in s)
         {
-            if (bits == 16) dw.Write((short)Math.Max(-32768, Math.Min(32767, (int)(x * 32767))));
+            if (bits == 8) dw.Write((byte)Math.Max(0, Math.Min(255, (int)(x * 127) + 128)));   // unsigned 8-bit
+            else if (bits == 16) dw.Write((short)Math.Max(-32768, Math.Min(32767, (int)(x * 32767))));
             else if (bits == 24)
             {
                 int v = Math.Max(-8388608, Math.Min(8388607, (int)(x * 8388607)));
@@ -634,7 +689,7 @@ class Tests
             else if (bits == 32 && fmtCode == 1) dw.Write((int)(x * 2147483647.0));   // 32-bit PCM int
         }
         byte[] dataBytes = data.ToArray();
-        int ch = 1, rate = 44100, blockAlign = ch * bits / 8, byteRate = rate * blockAlign;
+        int ch = channels, rate = 44100, blockAlign = ch * bits / 8, byteRate = rate * blockAlign;
 
         var fmt = new System.IO.MemoryStream();
         var fw = new System.IO.BinaryWriter(fmt);
@@ -705,5 +760,48 @@ class Tests
         // a real decoded clip must not be empty
         var d16 = WavDecoder.Decode(BuildWav(16, 1, false, sine), out _, out _, out _);
         Check("[wav] decoded sample count matches", d16 != null && d16.Length == N, d16 == null ? "null" : d16.Length.ToString());
+
+        // ---- deep checks: numeric edge cases & malformed input ----
+
+        // 24-bit must sign-extend negatives (the branch that used to be all-zero silence)
+        var d24n = WavDecoder.Decode(BuildWav(24, 1, false, new float[] { -0.5f, -0.5f, -0.5f, -0.5f }), out _, out _, out _);
+        Check("[wav] 24-bit sign-extends negatives", d24n != null && d24n[0] < -0.45f && d24n[0] > -0.55f, d24n == null ? "null" : d24n[0].ToString("0.000"));
+
+        // full-scale extremes stay clamped in [-1,1]
+        var d24e = WavDecoder.Decode(BuildWav(24, 1, false, new float[] { 1.0f, -1.0f, 1.0f, -1.0f }), out _, out _, out _);
+        Check("[wav] 24-bit extremes in range", d24e != null && d24e[0] <= 1.0001f && d24e[1] >= -1.0001f, d24e == null ? "null" : (d24e[0] + "/" + d24e[1]));
+
+        // stereo: channel count + L/R interleaving preserved (frames = total/channels in BoxSound)
+        var dst2 = WavDecoder.Decode(BuildWav(16, 1, false, new float[] { 0.3f, -0.7f, 0.3f, -0.7f }, 2), out int sch, out _, out _);
+        Check("[wav] stereo channels=2", sch == 2, sch);
+        Check("[wav] stereo interleave L/R", dst2 != null && dst2.Length == 4 && dst2[0] > 0.25f && dst2[1] < -0.65f, dst2 == null ? "null" : (dst2[0] + "/" + dst2[1]));
+
+        // 8-bit unsigned PCM round-trips (coarse, so looser tolerance)
+        var d8 = WavDecoder.Decode(BuildWav(8, 1, false, sine), out _, out _, out _);
+        Check("[wav] 8-bit decodes", d8 != null && Rms(d8, sine) < 0.05, d8 == null ? "null" : Rms(d8, sine).ToString("0.000"));
+
+        // a legit all-silence file must NOT be rejected — zeros are valid audio
+        var dsil = WavDecoder.Decode(BuildWav(16, 1, false, new float[64]), out _, out _, out var esil);
+        Check("[wav] silence not rejected", dsil != null && esil == null, esil);
+
+        // malformed: a "fmt " id positioned so its body runs past the buffer must reject, not throw/over-read
+        var bad = new byte[44];
+        bad[0] = (byte)'R'; bad[1] = (byte)'I'; bad[2] = (byte)'F'; bad[3] = (byte)'F';
+        bad[8] = (byte)'W'; bad[9] = (byte)'A'; bad[10] = (byte)'V'; bad[11] = (byte)'E';
+        bad[12] = (byte)'J'; bad[13] = (byte)'U'; bad[14] = (byte)'N'; bad[15] = (byte)'K'; bad[16] = 16;   // JUNK chunk, sz=16 -> p advances to 36
+        bad[36] = (byte)'f'; bad[37] = (byte)'m'; bad[38] = (byte)'t'; bad[39] = (byte)' ';                 // fmt id at 36; body would read past 44
+        bool threw = false; float[] dtr = null; string etr = null;
+        try { dtr = WavDecoder.Decode(bad, out _, out _, out etr); } catch (Exception ex) { threw = true; etr = ex.GetType().Name; }
+        Check("[wav] truncated fmt rejected without throwing", !threw && dtr == null, threw ? "THREW " + etr : (dtr == null ? "ok" : "decoded"));
+
+        // malformed: a corrupt (huge) chunk size must not run the walker off the end
+        var bad2 = new byte[64];
+        bad2[0] = (byte)'R'; bad2[1] = (byte)'I'; bad2[2] = (byte)'F'; bad2[3] = (byte)'F';
+        bad2[8] = (byte)'W'; bad2[9] = (byte)'A'; bad2[10] = (byte)'V'; bad2[11] = (byte)'E';
+        bad2[12] = (byte)'x'; bad2[13] = (byte)'x'; bad2[14] = (byte)'x'; bad2[15] = (byte)'x';
+        bad2[16] = 0xFF; bad2[17] = 0xFF; bad2[18] = 0xFF; bad2[19] = 0x7F;   // size ~2GB
+        bool threw2 = false;
+        try { WavDecoder.Decode(bad2, out _, out _, out _); } catch { threw2 = true; }
+        Check("[wav] corrupt chunk size handled without throwing", !threw2, threw2 ? "THREW" : "ok");
     }
 }
