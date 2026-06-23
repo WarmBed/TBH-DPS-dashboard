@@ -174,7 +174,7 @@ namespace TbhDpsMeter
             _gearScoreToggleKeyName = Config.Bind("GearScoreUI", "ToggleKey", "F7", "Key to show/hide the gear-score overlay (UnityEngine.KeyCode name).");
             ItemStatsPosX = Config.Bind("ItemStatsUI", "PosX", -1f, "Item-stats overlay X (auto-saved when dragged). -1 = auto.");
             ItemStatsPosY = Config.Bind("ItemStatsUI", "PosY", -1f, "Item-stats overlay Y (auto-saved when dragged). -1 = auto.");
-            ItemStatsPanelWidth = Config.Bind("ItemStatsUI", "PanelWidth", 360f, "Item-stats overlay panel width in pixels.");
+            ItemStatsPanelWidth = Config.Bind("ItemStatsUI", "PanelWidth", 468f, "Item-stats overlay panel width in pixels.");
             ItemStatsStartVisible = Config.Bind("ItemStatsUI", "StartVisible", false, "Show the item-stats overlay on launch.");
             _itemStatsToggleKeyName = Config.Bind("ItemStatsUI", "ToggleKey", "F8", "Key to show/hide the item-stats overlay (UnityEngine.KeyCode name).");
             DebugSnapshot = Config.Bind("Debug", "LogSnapshot", false, "Log character-snapshot reflection diagnostics to verify obfuscated member picks.");

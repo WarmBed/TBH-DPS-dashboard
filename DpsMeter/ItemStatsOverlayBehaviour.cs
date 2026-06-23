@@ -94,7 +94,7 @@ namespace TbhDpsMeter
             float rw = _rect.width, dh = 0f;
             var rr = _resize.Handle(Slot, m, ref rw, ref dh, 280f, Mathf.Max(280f, Screen.width * 0.95f), 0f, 0f, false);
             _rect.width = rw;
-            if (rr == PanelResize.Result.Reset) { _rect.width = 360f; Plugin.ItemStatsPanelWidth.Value = _rect.width; return; }
+            if (rr == PanelResize.Result.Reset) { _rect.width = 468f; Plugin.ItemStatsPanelWidth.Value = _rect.width; return; }
             if (rr == PanelResize.Result.Committed) { Plugin.ItemStatsPanelWidth.Value = _rect.width; return; }
             if (rr != PanelResize.Result.None) return;
             if (InputCompat.MousePressed())
