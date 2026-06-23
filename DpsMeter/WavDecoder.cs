@@ -24,7 +24,7 @@ namespace TbhDpsMeter
             {
                 string id = "" + (char)b[p] + (char)b[p + 1] + (char)b[p + 2] + (char)b[p + 3];
                 int sz = BitConverter.ToInt32(b, p + 4);
-                if (id == "fmt ")
+                if (id == "fmt " && sz >= 16 && p + 24 <= b.Length)   // body must be fully present before reading fixed offsets
                 {
                     format = BitConverter.ToInt16(b, p + 8);
                     channels = BitConverter.ToInt16(b, p + 10);
@@ -36,7 +36,7 @@ namespace TbhDpsMeter
                         format = BitConverter.ToInt16(b, p + 32);
                 }
                 else if (id == "data") { dataPos = p + 8; dataLen = sz; break; }
-                if (sz < 0) break;
+                if (sz < 0 || sz > b.Length) break;   // corrupt/oversized chunk -> stop (don't overflow p or over-read)
                 p += 8 + sz + (sz & 1);
             }
             if (dataPos < 0 || channels < 1) { error = "no audio data chunk"; return null; }
