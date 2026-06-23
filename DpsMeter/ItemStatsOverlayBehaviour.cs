@@ -4,21 +4,22 @@ using UnityEngine;
 namespace TbhDpsMeter
 {
     /// <summary>IMGUI overlay (F8): counts of everything held in the backpack + warehouse (stash) +
-    /// trading stash — NOT equipped gear. A 品階/種類/清單 tab switches between a rarity breakdown, a
-    /// category breakdown, and a per-ItemKey list (icon-less, name + ×N). The body is a FIXED-height,
-    /// mouse-wheel-scrolled viewport. Read-only; data comes from the decrypted save via
-    /// <see cref="SaveGearReader.ReadInventory"/>.</summary>
+    /// trading stash — NOT equipped gear. A single scrollable item list (icon + name + ×N) with two rows
+    /// of filter chips above it: rarity (品階) and category (種類). Selecting a chip filters the list;
+    /// clicking it again clears that filter. Chip counts cross-update with the other active filter. The
+    /// body is a FIXED-height, mouse-wheel-scrolled viewport. Read-only; data comes from the decrypted
+    /// save via <see cref="SaveGearReader.ReadInventory"/>.</summary>
     public class ItemStatsOverlayBehaviour : MonoBehaviour
     {
         public ItemStatsOverlayBehaviour(System.IntPtr ptr) : base(ptr) { }
 
         private const int Slot = 10;          // InputCompat panel slot (must be unique per panel)
         private const float Pad = 10f;
-        private enum View { Grade, Type, List }
 
         private Rect _rect = new Rect(70, 70, 360, 0);
         private bool _visible;
-        private View _view = View.Grade;
+        private string _gradeFilter = "";     // "" = all
+        private string _typeFilter = "";      // "" = all
         private float _opacity = 0.9f;
         private bool _placed;
         private float _wantX, _wantY, _scale = 1f;
@@ -28,12 +29,19 @@ namespace TbhDpsMeter
         private GUIStyle _title, _label, _dim, _btn, _box; private bool _stylesReady;
         private int _builtFs = -1, _builtFsm = -1;
         private Rect _closeRect;
-        private readonly List<Rect> _tabRects = new List<Rect>();
         private readonly PanelResize _resize = new PanelResize();
         private Rect ScaledRect() => new Rect(_rect.x, _rect.y, _rect.width * _scale, _rect.height * _scale);
 
         private InventoryStats _stats = new InventoryStats();
         private float _nextRefresh;
+
+        // per-frame scratch (reused to avoid GC)
+        private readonly List<int> _filtered = new List<int>();               // item indices passing both filters
+        private readonly List<Rect> _chipRects = new List<Rect>();            // chip hit-boxes (this frame)
+        private readonly List<bool> _chipIsGrade = new List<bool>();          // true = grade chip, false = type chip
+        private readonly List<string> _chipVals = new List<string>();        // chip filter value ("" = all)
+        private readonly List<KeyValuePair<string, int>> _gradeChips = new List<KeyValuePair<string, int>>();
+        private readonly List<KeyValuePair<string, int>> _typeChips = new List<KeyValuePair<string, int>>();
 
         void Awake()
         {
@@ -92,8 +100,15 @@ namespace TbhDpsMeter
             if (InputCompat.MousePressed())
             {
                 if (_closeRect.Contains(m)) { _visible = false; return; }
-                for (int t = 0; t < _tabRects.Count; t++)
-                    if (_tabRects[t].Contains(m)) { _view = (View)t; _scrollY = 0f; return; }
+                for (int c = 0; c < _chipRects.Count; c++)
+                    if (_chipRects[c].Contains(m))
+                    {
+                        // toggle: re-clicking an active filter clears it
+                        if (_chipIsGrade[c]) _gradeFilter = _gradeFilter == _chipVals[c] ? "" : _chipVals[c];
+                        else _typeFilter = _typeFilter == _chipVals[c] ? "" : _chipVals[c];
+                        _scrollY = 0f;
+                        return;
+                    }
                 if (_rect.Contains(m) && InputCompat.ClaimDrag(Slot)) { _dragging = true; _dragOffset = ms - new Vector2(_rect.x, _rect.y); }
             }
             if (_dragging)
@@ -126,6 +141,33 @@ namespace TbhDpsMeter
             _stylesReady = true;
         }
 
+        // recompute the filtered item list and the per-dimension chip counts (each dimension counts under the
+        // OTHER active filter, so the chip numbers stay consistent with what selecting them would show).
+        private void Rebuild()
+        {
+            _filtered.Clear(); _gradeChips.Clear(); _typeChips.Clear();
+            var gradeCount = new Dictionary<string, int>();
+            var typeCount = new Dictionary<string, int>();
+            int gradeTotal = 0, typeTotal = 0;
+            for (int i = 0; i < _stats.Items.Count; i++)
+            {
+                var it = _stats.Items[i];
+                bool gm = _gradeFilter == "" || it.Grade == _gradeFilter || (_gradeFilter == "?" && string.IsNullOrEmpty(it.Grade));
+                bool tm = _typeFilter == "" || it.Type == _typeFilter;
+                if (tm) { string k = string.IsNullOrEmpty(it.Grade) ? "?" : it.Grade; gradeCount.TryGetValue(k, out int g); gradeCount[k] = g + it.Count; gradeTotal += it.Count; }
+                if (gm) { typeCount.TryGetValue(it.Type, out int t); typeCount[it.Type] = t + it.Count; typeTotal += it.Count; }
+                if (gm && tm) _filtered.Add(i);
+            }
+            // ordered chip lists: grades by rarity (use ByGrade's order), types by count (ByType's order)
+            foreach (var kv in _stats.ByGrade)
+            {
+                string k = string.IsNullOrEmpty(kv.Key) ? "?" : kv.Key;
+                if (gradeCount.TryGetValue(k, out int n) && n > 0) _gradeChips.Add(new KeyValuePair<string, int>(k, n));
+            }
+            foreach (var kv in _stats.ByType)
+                if (typeCount.TryGetValue(kv.Key, out int n) && n > 0) _typeChips.Add(new KeyValuePair<string, int>(kv.Key, n));
+        }
+
         void OnGUI()
         {
             if (!_visible || GameUiState.MenuOpen()) return;
@@ -135,24 +177,25 @@ namespace TbhDpsMeter
             {
                 EnsureAssets();
                 if (!_placed) PlaceDefault();
+                Rebuild();
                 int fs = Plugin.FontSize.Value; float lh = fs + 7;
                 float w = _rect.width, iw = w - Pad * 2;
-                float rowH = lh * 1.5f;   // taller icon row, used by the 清單 (list) view
+                float rowH = lh * 1.5f;       // icon list row
+                float chipH = lh + 2f;        // chip row line height
 
-                // grade/type are compact text rows (lh); the list shows an icon per row (rowH).
-                int count = _view == View.Grade ? _stats.ByGrade.Count
-                          : _view == View.Type ? _stats.ByType.Count
-                          : _stats.Items.Count;
-                float rh = _view == View.List ? rowH : lh;
-                float contentH = Mathf.Max(count, 1) * rh;
+                // ---- measure the two wrapping chip rows (width-only, so height matches the draw pass) ----
+                float gradePfx = _dim.CalcSize(new GUIContent(Loc.G("items_by_grade"))).x + 6f;
+                float typePfx = _dim.CalcSize(new GUIContent(Loc.G("items_by_type"))).x + 6f;
+                float gradeH = ChipRow(true, gradePfx, 0f, iw, chipH, false);
+                float typeH = ChipRow(false, typePfx, 0f, iw, chipH, false);
 
-                // ---- fixed-height layout: header + summary + tabs, then capped scroll viewport ----
-                float headerBlock = Pad + lh /*title*/ + lh /*summary*/ + lh /*tabs*/;
+                int count = _filtered.Count;
+                float contentH = Mathf.Max(count, 1) * rowH;
+
+                float headerBlock = Pad + lh /*title*/ + lh /*summary*/ + gradeH + typeH;
                 float maxPanelH = Screen.height * 0.88f / Mathf.Max(0.3f, UiScale.User);
-                // cap the viewport to ~16 rows so a long list scrolls inside a compact panel rather than
-                // stretching the whole panel down the screen.
-                float maxBodyH = Mathf.Min(maxPanelH - headerBlock - Pad, rh * 16f);
-                maxBodyH = Mathf.Max(rh * 4f, maxBodyH);
+                float maxBodyH = Mathf.Min(maxPanelH - headerBlock - Pad, rowH * 14f);
+                maxBodyH = Mathf.Max(rowH * 4f, maxBodyH);
                 float bodyH = Mathf.Min(contentH, maxBodyH);
                 _rect.height = headerBlock + bodyH + Pad;
                 _scale = UiScale.Fit(_rect.width, _rect.height);
@@ -181,33 +224,34 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(ix, cy, iw, lh), summary, _dim);
                 cy += lh;
 
-                // ---- view tabs ----
-                _tabRects.Clear();
-                float tx = ix; float maxX = x + w - Pad;
-                DrawTab(ref tx, maxX, cy, lh, View.Grade, Loc.G("items_by_grade"));
-                DrawTab(ref tx, maxX, cy, lh, View.Type, Loc.G("items_by_type"));
-                DrawTab(ref tx, maxX, cy, lh, View.List, Loc.G("items_list"));
-                cy += lh;
+                // ---- filter chip rows (rarity, then category) ----
+                _chipRects.Clear(); _chipIsGrade.Clear(); _chipVals.Clear();
+                GUI.Label(new Rect(ix, cy + 1, gradePfx, chipH), Loc.G("items_by_grade"), _dim);
+                ChipRow(true, gradePfx, cy, iw, chipH, true, ix, x, w);
+                cy += gradeH;
+                GUI.Label(new Rect(ix, cy + 1, typePfx, chipH), Loc.G("items_by_type"), _dim);
+                ChipRow(false, typePfx, cy, iw, chipH, true, ix, x, w);
+                cy += typeH;
 
-                if (_stats.Total == 0 || count == 0)
+                if (count == 0)
                 {
                     GUI.Label(new Rect(ix, cy, iw, lh), Loc.G("items_empty"), _dim);
                     _resize.DrawGrip(_white, _rect);
                     return;
                 }
 
-                // ---- body: fixed viewport, wheel-scrolled, whole-line windowed ----
+                // ---- body: fixed viewport, wheel-scrolled, whole-row windowed ----
                 float bodyTop = cy;
                 float maxScroll = Mathf.Max(0f, contentH - bodyH);
                 _scrollY = Mathf.Clamp(_scrollY, 0f, maxScroll);
-                int first = Mathf.Clamp(Mathf.FloorToInt(_scrollY / rh), 0, count);
-                _scrollY = first * rh;   // snap so the top row is whole
+                int first = Mathf.Clamp(Mathf.FloorToInt(_scrollY / rowH), 0, count);
+                _scrollY = first * rowH;
                 float drawn = 0f;
                 for (int r = first; r < count; r++)
                 {
-                    if (drawn + rh > bodyH + 0.5f) break;
-                    DrawRow(r, bodyTop + drawn, x, w, ix, iw, lh, rowH);
-                    drawn += rh;
+                    if (drawn + rowH > bodyH + 0.5f) break;
+                    DrawItemRow(_stats.Items[_filtered[r]], bodyTop + drawn, x, w, ix, iw, lh, rowH);
+                    drawn += rowH;
                 }
 
                 if (contentH > bodyH + 0.5f)
@@ -225,48 +269,56 @@ namespace TbhDpsMeter
             finally { GUI.matrix = prevM; }
         }
 
-        // one body row for the current view. Grade/Type are text+count at height lh; List is an icon row
-        // (icon + grade-coloured name + ×N) at height rowH.
-        private void DrawRow(int r, float ry, float x, float w, float ix, float iw, float lh, float rowH)
+        // Lay out one wrapping chip row. Measure pass (draw=false): returns the row's total height, computed
+        // from chip widths only so it matches the draw pass. Draw pass (draw=true): renders chips at the real
+        // origin (ix/oyAbs) and records hit-boxes. The first chip is the "all" reset; rarity chips are tinted
+        // by grade colour.
+        private float ChipRow(bool grade, float pfx, float oyAbs, float maxRelW, float chipH, bool draw,
+                              float ix = 0f, float x = 0f, float w = 0f)
         {
-            string label; int n;
-            if (_view == View.Grade)
+            var chips = grade ? _gradeChips : _typeChips;
+            string curFilter = grade ? _gradeFilter : _typeFilter;
+            float gap = 4f;
+            float relX = pfx, relY = 0f;   // relative to the row origin
+
+            // "all" chip first
+            int total = 0; foreach (var c in chips) total += c.Value;
+            void Emit(string value, string text, bool sel)
             {
-                var kv = _stats.ByGrade[r];
-                label = $"<color=#{GradeColor(kv.Key)}>{GradeName(kv.Key)}</color>"; n = kv.Value;
+                float bw = Mathf.Min(_btn.CalcSize(new GUIContent(text)).x + 10f, maxRelW);
+                if (relX + bw > maxRelW && relX > pfx) { relX = pfx; relY += chipH; }
+                if (draw)
+                {
+                    var r = new Rect(ix + relX, oyAbs + relY, bw, chipH - 2f);
+                    GUI.Button(r, text, _btn);
+                    if (sel) DrawRect(r.x + 3, r.y + chipH - 4f, r.width - 6, 2f, new Color(1f, 0.82f, 0.30f, 0.95f));
+                    _chipRects.Add(r); _chipIsGrade.Add(grade); _chipVals.Add(value);
+                }
+                relX += bw + gap;
             }
-            else if (_view == View.Type)
+
+            Emit("", $"{Loc.G("gearscore_all")} <color=#7f8794>{total}</color>", curFilter == "");
+            foreach (var c in chips)
             {
-                var kv = _stats.ByType[r];
-                label = TypeLabel(kv.Key); n = kv.Value;
+                bool sel = curFilter == c.Key;
+                string name = grade ? $"<color=#{GradeColor(c.Key == "?" ? "" : c.Key)}>{GradeName(c.Key == "?" ? "" : c.Key)}</color>" : TypeLabel(c.Key);
+                string text = sel ? $"<b>{name}</b> <color=#cdd5df>{c.Value}</color>" : $"{name} <color=#7f8794>{c.Value}</color>";
+                Emit(c.Key, text, sel);
             }
-            else
-            {
-                var it = _stats.Items[r];
-                var iconRect = new Rect(ix, ry + 1.5f, rowH - 4, rowH - 4);
-                Texture tex = GearIconCache.Get(it.ItemKey);
-                if (tex != null) GUI.DrawTexture(iconRect, tex, ScaleMode.ScaleToFit);
-                else { var prev = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconRect, _white); GUI.color = prev; }
-                float tx = ix + rowH;
-                float ty = ry + (rowH - lh) * 0.5f;
-                GUI.Label(new Rect(tx, ty, iw - rowH - 56, lh), $"<color=#{GradeColor(it.Grade)}>{it.Name}</color>", _label);
-                GUI.Label(new Rect(x + w - Pad - 56, ty, 52, lh), $"<color=#7FB2FF>×{it.Count}</color>", _label);
-                return;
-            }
-            GUI.Label(new Rect(ix, ry, iw - 56, lh), label, _label);
-            GUI.Label(new Rect(x + w - Pad - 56, ry, 52, lh), $"<color=#7FB2FF>×{n}</color>", _label);
+            return relY + chipH;
         }
 
-        private void DrawTab(ref float tx, float maxX, float cy, float lh, View v, string label)
+        // one list row: icon + grade-coloured name + ×N.
+        private void DrawItemRow(ItemCount it, float ry, float x, float w, float ix, float iw, float lh, float rowH)
         {
-            bool sel = (_view == v);
-            float bw = Mathf.Min(_btn.CalcSize(new GUIContent(label)).x + 14f, 140f);
-            if (tx + bw > maxX && _tabRects.Count > 0) bw = Mathf.Max(40f, maxX - tx);
-            var r = new Rect(tx, cy - 1, bw, lh);
-            GUI.Button(r, sel ? $"<color=#FFD24D>{label}</color>" : label, _btn);
-            if (sel) DrawRect(r.x + 3, r.y + lh - 2, r.width - 6, 2, new Color(1f, 0.82f, 0.30f, 0.95f));
-            _tabRects.Add(r);
-            tx += bw + 4f;
+            var iconRect = new Rect(ix, ry + 1.5f, rowH - 4, rowH - 4);
+            Texture tex = GearIconCache.Get(it.ItemKey);
+            if (tex != null) GUI.DrawTexture(iconRect, tex, ScaleMode.ScaleToFit);
+            else { var prev = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconRect, _white); GUI.color = prev; }
+            float tx = ix + rowH;
+            float ty = ry + (rowH - lh) * 0.5f;
+            GUI.Label(new Rect(tx, ty, iw - rowH - 56, lh), $"<color=#{GradeColor(it.Grade)}>{it.Name}</color>", _label);
+            GUI.Label(new Rect(x + w - Pad - 56, ty, 52, lh), $"<color=#7FB2FF>×{it.Count}</color>", _label);
         }
 
         private void DrawRect(float rx, float ry, float rw, float rh, Color c)
