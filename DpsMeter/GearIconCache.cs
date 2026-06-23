@@ -5,13 +5,14 @@ using UnityEngine;
 
 namespace TbhDpsMeter
 {
-    /// <summary>Lazily fetches gear icons from the wiki (https://taskbarhero.wiki/game/gear/&lt;path&gt;)
-    /// by ItemKey and caches the resulting Texture2D. Only equipped items are ever requested (~10/char),
-    /// so this is a handful of small one-time downloads. Bytes are fetched on a background Task; the
-    /// Texture2D is created on the main thread (Unity requirement) the next time Get() is called from OnGUI.</summary>
+    /// <summary>Lazily fetches item icons from the wiki by ItemKey and caches the resulting Texture2D.
+    /// Gear lives under /game/gear/&lt;path&gt;; non-gear (materials/boxes) under /game/&lt;path&gt; — the base
+    /// is chosen by the item's category. Bytes are fetched on a background Task; the Texture2D is created on
+    /// the main thread (Unity requirement) the next time Get() is called from OnGUI.</summary>
     internal static class GearIconCache
     {
-        private const string Base = "https://taskbarhero.wiki/game/gear/";
+        private const string GearBase = "https://taskbarhero.wiki/game/gear/";
+        private const string ItemBase = "https://taskbarhero.wiki/game/";
 
         private static readonly Dictionary<int, Texture2D> _tex = new Dictionary<int, Texture2D>(); // resolved (null = failed)
         private static readonly Dictionary<int, byte[]> _bytes = new Dictionary<int, byte[]>();      // downloaded, awaiting upload
@@ -43,7 +44,8 @@ namespace TbhDpsMeter
             }
             string path = ItemMetaStore.IconPath(itemKey);
             if (string.IsNullOrEmpty(path)) { _tex[itemKey] = null; lock (_lock) { _pending.Remove(itemKey); } return null; }
-            string url = Base + path;
+            // gear icon paths are relative to /game/gear/; non-gear (materials/boxes) to /game/ root.
+            string url = (ItemMetaStore.Category(itemKey) == "GEAR" ? GearBase : ItemBase) + path;
             Task.Run(async () =>
             {
                 try

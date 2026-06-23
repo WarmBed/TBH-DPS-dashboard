@@ -137,28 +137,22 @@ namespace TbhDpsMeter
                 if (!_placed) PlaceDefault();
                 int fs = Plugin.FontSize.Value; float lh = fs + 7;
                 float w = _rect.width, iw = w - Pad * 2;
+                float rowH = lh * 1.5f;   // taller icon row, used by the 清單 (list) view
 
-                // ---- build the rows for the current view ----
-                var rows = new List<KeyValuePair<string, int>>();   // (richTextLabel, count)
-                if (_view == View.Grade)
-                    foreach (var kv in _stats.ByGrade)
-                        rows.Add(new KeyValuePair<string, int>($"<color=#{GradeColor(kv.Key)}>{GradeName(kv.Key)}</color>", kv.Value));
-                else if (_view == View.Type)
-                    foreach (var kv in _stats.ByType)
-                        rows.Add(new KeyValuePair<string, int>(TypeLabel(kv.Key), kv.Value));
-                else
-                    foreach (var it in _stats.Items)
-                        rows.Add(new KeyValuePair<string, int>($"<color=#{GradeColor(it.Grade)}>{it.Name}</color>", it.Count));
-
-                float contentH = Mathf.Max(rows.Count, 1) * lh;
+                // grade/type are compact text rows (lh); the list shows an icon per row (rowH).
+                int count = _view == View.Grade ? _stats.ByGrade.Count
+                          : _view == View.Type ? _stats.ByType.Count
+                          : _stats.Items.Count;
+                float rh = _view == View.List ? rowH : lh;
+                float contentH = Mathf.Max(count, 1) * rh;
 
                 // ---- fixed-height layout: header + summary + tabs, then capped scroll viewport ----
                 float headerBlock = Pad + lh /*title*/ + lh /*summary*/ + lh /*tabs*/;
                 float maxPanelH = Screen.height * 0.88f / Mathf.Max(0.3f, UiScale.User);
                 // cap the viewport to ~16 rows so a long list scrolls inside a compact panel rather than
                 // stretching the whole panel down the screen.
-                float maxBodyH = Mathf.Min(maxPanelH - headerBlock - Pad, lh * 16f);
-                maxBodyH = Mathf.Max(lh * 4f, maxBodyH);
+                float maxBodyH = Mathf.Min(maxPanelH - headerBlock - Pad, rh * 16f);
+                maxBodyH = Mathf.Max(rh * 4f, maxBodyH);
                 float bodyH = Mathf.Min(contentH, maxBodyH);
                 _rect.height = headerBlock + bodyH + Pad;
                 _scale = UiScale.Fit(_rect.width, _rect.height);
@@ -195,7 +189,7 @@ namespace TbhDpsMeter
                 DrawTab(ref tx, maxX, cy, lh, View.List, Loc.G("items_list"));
                 cy += lh;
 
-                if (_stats.Total == 0 || rows.Count == 0)
+                if (_stats.Total == 0 || count == 0)
                 {
                     GUI.Label(new Rect(ix, cy, iw, lh), Loc.G("items_empty"), _dim);
                     _resize.DrawGrip(_white, _rect);
@@ -206,16 +200,14 @@ namespace TbhDpsMeter
                 float bodyTop = cy;
                 float maxScroll = Mathf.Max(0f, contentH - bodyH);
                 _scrollY = Mathf.Clamp(_scrollY, 0f, maxScroll);
-                int first = Mathf.Clamp(Mathf.FloorToInt(_scrollY / lh), 0, rows.Count);
-                _scrollY = first * lh;   // snap so the top row is whole
+                int first = Mathf.Clamp(Mathf.FloorToInt(_scrollY / rh), 0, count);
+                _scrollY = first * rh;   // snap so the top row is whole
                 float drawn = 0f;
-                for (int r = first; r < rows.Count; r++)
+                for (int r = first; r < count; r++)
                 {
-                    if (drawn + lh > bodyH + 0.5f) break;
-                    float ry = bodyTop + drawn;
-                    GUI.Label(new Rect(ix, ry, iw - 56, lh), rows[r].Key, _label);
-                    GUI.Label(new Rect(x + w - Pad - 56, ry, 52, lh), $"<color=#7FB2FF>×{rows[r].Value}</color>", _label);
-                    drawn += lh;
+                    if (drawn + rh > bodyH + 0.5f) break;
+                    DrawRow(r, bodyTop + drawn, x, w, ix, iw, lh, rowH);
+                    drawn += rh;
                 }
 
                 if (contentH > bodyH + 0.5f)
@@ -231,6 +223,38 @@ namespace TbhDpsMeter
             }
             catch { }
             finally { GUI.matrix = prevM; }
+        }
+
+        // one body row for the current view. Grade/Type are text+count at height lh; List is an icon row
+        // (icon + grade-coloured name + ×N) at height rowH.
+        private void DrawRow(int r, float ry, float x, float w, float ix, float iw, float lh, float rowH)
+        {
+            string label; int n;
+            if (_view == View.Grade)
+            {
+                var kv = _stats.ByGrade[r];
+                label = $"<color=#{GradeColor(kv.Key)}>{GradeName(kv.Key)}</color>"; n = kv.Value;
+            }
+            else if (_view == View.Type)
+            {
+                var kv = _stats.ByType[r];
+                label = TypeLabel(kv.Key); n = kv.Value;
+            }
+            else
+            {
+                var it = _stats.Items[r];
+                var iconRect = new Rect(ix, ry + 1.5f, rowH - 4, rowH - 4);
+                Texture tex = GearIconCache.Get(it.ItemKey);
+                if (tex != null) GUI.DrawTexture(iconRect, tex, ScaleMode.ScaleToFit);
+                else { var prev = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconRect, _white); GUI.color = prev; }
+                float tx = ix + rowH;
+                float ty = ry + (rowH - lh) * 0.5f;
+                GUI.Label(new Rect(tx, ty, iw - rowH - 56, lh), $"<color=#{GradeColor(it.Grade)}>{it.Name}</color>", _label);
+                GUI.Label(new Rect(x + w - Pad - 56, ty, 52, lh), $"<color=#7FB2FF>×{it.Count}</color>", _label);
+                return;
+            }
+            GUI.Label(new Rect(ix, ry, iw - 56, lh), label, _label);
+            GUI.Label(new Rect(x + w - Pad - 56, ry, 52, lh), $"<color=#7FB2FF>×{n}</color>", _label);
         }
 
         private void DrawTab(ref float tx, float maxX, float cy, float lh, View v, string label)
