@@ -7,7 +7,7 @@
 [![Stars](https://img.shields.io/github/stars/WarmBed/TBH-DPS-dashboard?logo=github&style=flat&label=stars&color=blue)](../../stargazers)
 
 In-game overlay for **TaskBarHero** (TBH: Task Bar Hero) — **DPS · damage-taken · stage-compare ·
-gear-score · farming-planner · box-log · opened-box stats · loot-heatmap · Steam-market price-peek**,
+gear-score · item-stats · farming-planner · box-log · opened-box stats · loot-heatmap · Steam-market price-peek**,
 all toggled from an **F1 control center**.
 Built as a BepInEx 6 IL2CPP plugin. Tested on game **v1.00.09** (Unity 6 / IL2CPP).
 UI auto-detects **English / 日本語 / 繁體中文 / 简体中文 / Español**.
@@ -75,6 +75,22 @@ in-game language.
 <img src="image/裝備評分.png" alt="Gear-score panel" width="300">
 
 > *Per-character total + attack/defence split; each item rarity-coloured with icon, level, sockets and score. Detailed mode breaks every item into its scoring parts.*
+
+## Item Stats (F8)
+Press **F8** for the **item-stats panel** — it counts everything you're holding across your **backpack +
+warehouse (stash) + trading stash** (equipped gear excluded). A single scrollable list shows one row per
+item (**icon** + **rarity-coloured** name + **×N** held), with identical items merged. Two rows of filter
+chips above the list let you slice by **rarity** and by **category** — combine them (e.g. Immortal × Ring),
+click a chip again to clear it, and each chip's count cross-updates with the other active filter.
+
+Rarity, category, name and icon come from a bundled wiki table keyed by item, so it works **offline** and
+in all 5 UI languages — and it covers non-gear (materials, boxes) too. The summary line shows bag /
+warehouse / trade as **used / capacity**, with warehouse capacity reflecting your active tabs (a full
+4-tab warehouse reads 196/196, not 196/343).
+
+<img src="image/倉庫頁面.png" alt="Item-stats panel" width="300">
+
+> *One scrollable list, one row per item with icon, rarity-coloured name and held count; rarity and category filter chips on top, counts that cross-update; summary shows bag/warehouse/trade used vs capacity.*
 
 ## Farming Planner (F6)
 Press **F6** for a **personalized** "what should I farm?" ranking of every stage — **gold/sec** and
@@ -164,6 +180,7 @@ to it for the text itself, saved as `UI.FontSize` and `UI.FontSizeSmall`.
 - **F10** — toggle the damage-taken panel (configurable: `TakenUI.ToggleKey`)
 - **F11** — toggle the stage-compare panel (configurable: `CompareUI.ToggleKey`)
 - **F7** — toggle the gear-score panel (configurable: `GearScoreUI.ToggleKey`)
+- **F8** — toggle the item-stats panel (configurable: `ItemStatsUI.ToggleKey`)
 - **F6** — toggle the farming planner (configurable: `FarmUI.ToggleKey`)
 - **F5** — toggle the box log (configurable: `BoxUI.ToggleKey`)
 - **F4** — toggle the opened-box stats panel (configurable: `BoxOpenUI.ToggleKey`)

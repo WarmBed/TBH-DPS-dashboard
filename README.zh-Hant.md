@@ -6,7 +6,7 @@
 [![Downloads](https://img.shields.io/github/downloads/WarmBed/TBH-DPS-dashboard/total?logo=github&label=downloads&color=brightgreen)](../../releases)
 [![Stars](https://img.shields.io/github/stars/WarmBed/TBH-DPS-dashboard?logo=github&style=flat&label=stars&color=blue)](../../stargazers)
 
-**TaskBarHero**（TBH: Task Bar Hero）的遊戲內 **DPS / 承受傷害 / 關卡比較 / 裝備評分 / 刷關效率 / 寶箱記錄 / 開箱統計 / 掉寶熱力圖 / Steam 市集查價** 監控外掛，
+**TaskBarHero**（TBH: Task Bar Hero）的遊戲內 **DPS / 承受傷害 / 關卡比較 / 裝備評分 / 物品統計 / 刷關效率 / 寶箱記錄 / 開箱統計 / 掉寶熱力圖 / Steam 市集查價** 監控外掛，
 全部都能從 **F1 中控台** 一鍵開關。以 BepInEx 6 IL2CPP 外掛實作。測試版本 **v1.00.09**（Unity 6 / IL2CPP）。
 介面自動偵測 **繁體中文 / 简体中文 / English / 日本語 / Español**。
 
@@ -64,6 +64,18 @@
 <img src="image/裝備評分.png" alt="裝備評分面板" width="300">
 
 > *逐角色總分 + 攻擊/防禦拆分;每件依稀有度上色,含 icon、等級、鑲嵌與分數。詳細模式把每件拆成各項計分明細。*
+
+## 物品統計（F8）
+按 **F8** 開啟**物品統計面板** —— 把你**背包＋倉庫＋交易倉**裡持有的所有物品全部清點（不含身上已裝備的裝備）。
+單一可捲動清單，一物一列（**icon** ＋依**稀有度上色**的名稱 ＋持有 **×N**），相同物品會合併。清單上方有兩排篩選 chip：
+依**品階**與依**種類**篩選，可組合（例如 不朽 × 戒指），再點一次即取消；每個 chip 的數量會跟另一個生效中的篩選**互相連動**更新。
+
+品階、種類、名稱與 icon 都來自內建的 wiki 對照表（以物品為 key），所以**離線可用**、5 種介面語言皆可，連非裝備（材料、寶箱）也涵蓋。
+最上面那行摘要把 背包／倉庫／交易 顯示成 **已用／容量**，倉庫容量會反映你開啟的分頁（開滿 4 頁的倉庫顯示 196/196，而非 196/343）。
+
+<img src="image/倉庫頁面.png" alt="物品統計面板" width="300">
+
+> *單一可捲動清單，一物一列含 icon、依稀有度上色的名稱與持有數；上方品階與種類篩選 chip，數量互相連動；摘要顯示 背包／倉庫／交易 的已用 vs 容量。*
 
 ## 刷關效率（F6）
 按 **F6** 開啟「現在該刷哪一關」的**個人化**排名 —— **金幣/秒** 與 **經驗/秒** 雙欄並列，可排序，有難度篩選 chip。
@@ -146,6 +158,7 @@
 - **F10** — 顯示/隱藏 承受傷害面板（可設定：`TakenUI.ToggleKey`）
 - **F11** — 顯示/隱藏 關卡比較面板（可設定：`CompareUI.ToggleKey`）
 - **F7** — 顯示/隱藏 裝備評分面板（可設定：`GearScoreUI.ToggleKey`）
+- **F8** — 顯示/隱藏 物品統計面板（可設定：`ItemStatsUI.ToggleKey`）
 - **F6** — 顯示/隱藏 刷關效率面板（可設定：`FarmUI.ToggleKey`）
 - **F5** — 顯示/隱藏 寶箱記錄面板（可設定：`BoxUI.ToggleKey`）
 - **F4** — 顯示/隱藏 開箱統計面板（可設定：`BoxOpenUI.ToggleKey`）
