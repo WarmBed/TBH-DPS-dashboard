@@ -203,9 +203,14 @@ namespace TbhDpsMeter
                 {
                     var arr = FindArray(inner, arrayKey);
                     if (arr == null) return;
-                    total = arr.Count;
                     foreach (var slot in arr)
                     {
+                        // a slot the player has bought: inventory spells it "IsUnlock", stash/trade "IsUnLock".
+                        // Count unlocked slots (not the raw array length) so the denominator is the real
+                        // capacity, not capacity-incl-unpurchased tabs.
+                        bool unlocked = Json.Get(slot, "IsUnlock") is bool a ? a
+                                      : Json.Get(slot, "IsUnLock") is bool b && b;
+                        if (unlocked) total++;
                         long uid = Json.Long(Json.Get(slot, "ItemUniqueId"));
                         if (uid == 0) continue;                       // empty slot
                         used++;
