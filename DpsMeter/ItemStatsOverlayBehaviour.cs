@@ -186,8 +186,8 @@ namespace TbhDpsMeter
                 // ---- measure the two wrapping chip rows (width-only, so height matches the draw pass) ----
                 float gradePfx = _dim.CalcSize(new GUIContent(Loc.G("items_by_grade"))).x + 6f;
                 float typePfx = _dim.CalcSize(new GUIContent(Loc.G("items_by_type"))).x + 6f;
-                float gradeH = ChipRow(true, gradePfx, 0f, iw, chipH, false);
-                float typeH = ChipRow(false, typePfx, 0f, iw, chipH, false);
+                float gradeH = ChipRow(true, gradePfx, 0f, iw, chipH, false, 0f);
+                float typeH = ChipRow(false, typePfx, 0f, iw, chipH, false, 0f);
 
                 int count = _filtered.Count;
                 float contentH = Mathf.Max(count, 1) * rowH;
@@ -227,10 +227,10 @@ namespace TbhDpsMeter
                 // ---- filter chip rows (rarity, then category) ----
                 _chipRects.Clear(); _chipIsGrade.Clear(); _chipVals.Clear();
                 GUI.Label(new Rect(ix, cy + 1, gradePfx, chipH), Loc.G("items_by_grade"), _dim);
-                ChipRow(true, gradePfx, cy, iw, chipH, true, ix, x, w);
+                ChipRow(true, gradePfx, cy, iw, chipH, true, ix);
                 cy += gradeH;
                 GUI.Label(new Rect(ix, cy + 1, typePfx, chipH), Loc.G("items_by_type"), _dim);
-                ChipRow(false, typePfx, cy, iw, chipH, true, ix, x, w);
+                ChipRow(false, typePfx, cy, iw, chipH, true, ix);
                 cy += typeH;
 
                 if (count == 0)
@@ -250,7 +250,7 @@ namespace TbhDpsMeter
                 for (int r = first; r < count; r++)
                 {
                     if (drawn + rowH > bodyH + 0.5f) break;
-                    DrawItemRow(_stats.Items[_filtered[r]], bodyTop + drawn, x, w, ix, iw, lh, rowH);
+                    DrawItemRow(_filtered[r], bodyTop + drawn, x, w, ix, iw, lh, rowH);
                     drawn += rowH;
                 }
 
@@ -271,20 +271,31 @@ namespace TbhDpsMeter
 
         // Lay out one wrapping chip row. Measure pass (draw=false): returns the row's total height, computed
         // from chip widths only so it matches the draw pass. Draw pass (draw=true): renders chips at the real
-        // origin (ix/oyAbs) and records hit-boxes. The first chip is the "all" reset; rarity chips are tinted
-        // by grade colour.
-        private float ChipRow(bool grade, float pfx, float oyAbs, float maxRelW, float chipH, bool draw,
-                              float ix = 0f, float x = 0f, float w = 0f)
+        // origin (ix/oyAbs) and records hit-boxes. Index -1 is the "all" reset chip; rarity chips are tinted
+        // by grade colour. No local functions / optional params / struct args here — Il2Cpp type registration
+        // rejects those signatures, which would fail the whole overlay-creation block.
+        private float ChipRow(bool grade, float pfx, float oyAbs, float maxRelW, float chipH, bool draw, float ix)
         {
             var chips = grade ? _gradeChips : _typeChips;
             string curFilter = grade ? _gradeFilter : _typeFilter;
-            float gap = 4f;
-            float relX = pfx, relY = 0f;   // relative to the row origin
-
-            // "all" chip first
+            float gap = 4f, relX = pfx, relY = 0f;
             int total = 0; foreach (var c in chips) total += c.Value;
-            void Emit(string value, string text, bool sel)
+
+            for (int idx = -1; idx < chips.Count; idx++)
             {
+                string value, text; bool sel;
+                if (idx < 0)
+                {
+                    value = ""; sel = curFilter == "";
+                    text = $"{Loc.G("gearscore_all")} <color=#7f8794>{total}</color>";
+                }
+                else
+                {
+                    var c = chips[idx]; value = c.Key; sel = curFilter == c.Key;
+                    string gk = c.Key == "?" ? "" : c.Key;
+                    string name = grade ? $"<color=#{GradeColor(gk)}>{GradeName(gk)}</color>" : TypeLabel(c.Key);
+                    text = sel ? $"<b>{name}</b> <color=#cdd5df>{c.Value}</color>" : $"{name} <color=#7f8794>{c.Value}</color>";
+                }
                 float bw = Mathf.Min(_btn.CalcSize(new GUIContent(text)).x + 10f, maxRelW);
                 if (relX + bw > maxRelW && relX > pfx) { relX = pfx; relY += chipH; }
                 if (draw)
@@ -296,21 +307,14 @@ namespace TbhDpsMeter
                 }
                 relX += bw + gap;
             }
-
-            Emit("", $"{Loc.G("gearscore_all")} <color=#7f8794>{total}</color>", curFilter == "");
-            foreach (var c in chips)
-            {
-                bool sel = curFilter == c.Key;
-                string name = grade ? $"<color=#{GradeColor(c.Key == "?" ? "" : c.Key)}>{GradeName(c.Key == "?" ? "" : c.Key)}</color>" : TypeLabel(c.Key);
-                string text = sel ? $"<b>{name}</b> <color=#cdd5df>{c.Value}</color>" : $"{name} <color=#7f8794>{c.Value}</color>";
-                Emit(c.Key, text, sel);
-            }
             return relY + chipH;
         }
 
-        // one list row: icon + grade-coloured name + ×N.
-        private void DrawItemRow(ItemCount it, float ry, float x, float w, float ix, float iw, float lh, float rowH)
+        // one list row: icon + grade-coloured name + ×N. Takes an index into _stats.Items (not the struct by
+        // value — Il2Cpp registration rejects struct parameters).
+        private void DrawItemRow(int itemIndex, float ry, float x, float w, float ix, float iw, float lh, float rowH)
         {
+            var it = _stats.Items[itemIndex];
             var iconRect = new Rect(ix, ry + 1.5f, rowH - 4, rowH - 4);
             Texture tex = GearIconCache.Get(it.ItemKey);
             if (tex != null) GUI.DrawTexture(iconRect, tex, ScaleMode.ScaleToFit);
