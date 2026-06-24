@@ -59,7 +59,7 @@ namespace TbhDpsMeter
         private bool _loaded;
 
         private FarmSortKey _sort = FarmSortKey.ExpPerSec;
-        private string _diff = "";          // "" = all difficulties
+        private string _diff = "NORMAL";    // default difficulty filter (no "all" — it overflowed small screens)
         private int _page;
 
         private Rect _closeRect, _handleRect, _goldHdr, _expHdr, _clearHdr, _pagePrev, _pageNext, _resetRect;
@@ -69,7 +69,7 @@ namespace TbhDpsMeter
         private bool _confirmReset;
         private readonly List<Rect> _chipRects = new List<Rect>();
         private readonly List<string> _chipKeys = new List<string>();
-        private static readonly string[] Difficulties = { "", "NORMAL", "NIGHTMARE", "HELL", "TORMENT" };
+        private static readonly string[] Difficulties = { "NORMAL", "NIGHTMARE", "HELL", "TORMENT" };
 
         void Awake()
         {
