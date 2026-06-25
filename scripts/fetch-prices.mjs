@@ -162,10 +162,10 @@ async function priceoverview(name, tries) {
   for (let attempt = 0; attempt < tries; attempt++) {
     try {
       const r = await fetch(priceUrl(name), { headers: { 'User-Agent': UA, ...PROXY_H } });
-      if (r.status === 429) { await sleep(VIA_PROXY ? 1500 : 15000); continue; }
+      if (r.status === 429) { await sleep(VIA_PROXY ? 1500 * (attempt + 1) : 15000); continue; }   // escalating backoff
       if (r.ok) { const pj = await r.json(); return (pj && pj.success) ? pj : null; }
     } catch { /* retry */ }
-    await sleep(VIA_PROXY ? 800 : 4000);
+    await sleep(VIA_PROXY ? 1000 * (attempt + 1) : 4000);
   }
   return null;
 }
@@ -180,8 +180,8 @@ function applyVol(name, pj) {
 const volNames = Object.keys(items);
 if (VIA_PROXY && !process.env.SKIP_VOL) {
   let done = 0, idx = 0;
-  const worker = async () => { while (idx < volNames.length) { const n = volNames[idx++]; if (applyVol(n, await priceoverview(n, 4))) done++; } };
-  await Promise.all(Array.from({ length: 24 }, worker));   // CF egress isn't throttled → high concurrency
+  const worker = async () => { while (idx < volNames.length) { const n = volNames[idx++]; if (applyVol(n, await priceoverview(n, 6))) done++; } };
+  await Promise.all(Array.from({ length: 8 }, worker));   // conc 8 + escalating retries ≈ 98% in ~3min (24 throttled to ~79%)
   vol.at = now;
   console.log(`refreshed volume/median for ${done}/${volNames.length} items (via proxy)`);
 } else if (!process.env.SKIP_VOL && volAge >= VOL_REFRESH_MS) {
