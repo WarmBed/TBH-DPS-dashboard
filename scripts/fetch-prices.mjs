@@ -75,7 +75,7 @@ while (guard++ < MAX_PAGES) {
   if (sinceNew >= STALL) break;                                   // dry — exhausted what Steam returns
   start += results.length || 10;                                 // advance by what we got (Steam pages ~10)
   if (maxTotal > 0 && start >= maxTotal) start = 0;              // wrap to re-catch items that shifted order
-  await sleep(2500 + Math.floor(Math.random() * 1500));          // be gentle to Steam between pages
+  await sleep(VIA_PROXY ? 150 : 2500 + Math.floor(Math.random() * 1500));   // CF egress isn't throttled → no need to pace
 }
 // total_count is inflated and unreachable, so it's NOT the completeness signal — the STALL above is.
 // Guard only against a clearly-truncated run (hard rate-limit) by refusing to ship a near-empty feed.
@@ -151,10 +151,12 @@ for (const [name, v] of Object.entries(items)) {
   if (win.length) v.hist = win.map(p => [Math.floor(p[0] / 1000), p[1], p[2] || 0]);
 }
 
-// ---- 24h volume + median sale price (priceoverview, per-item). Through the CF proxy this is cheap and
-// unthrottled, so refresh EVERY run with a small concurrency pool. Direct (no proxy) it's heavily
-// rate-limited, so fall back to the gentle ~6h sequential refresh persisted in history.vol. ----
+// ---- 24h volume + median sale price (priceoverview, per-item). Steam rate-limits this HARD even via
+// the proxy, so refreshing all ~740 every run can exceed the job timeout. Instead each run refreshes the
+// STALEST items first within a fixed time budget; values persist (per-item `at`) in history.vol and
+// rotate fully in over a few runs. Direct (no proxy) keeps the gentle ~6h sequential refresh. ----
 const VOL_REFRESH_MS = 6 * 3600 * 1000;
+const VOL_BUDGET_MS = Number(process.env.VOL_BUDGET_MS || 5 * 60 * 1000);   // per-run time box for the proxy refresh
 let vol = (history.vol && history.vol.items) ? history.vol : { at: 0, items: {} };
 const volAge = vol.at ? now - vol.at : Infinity;
 
@@ -162,28 +164,40 @@ async function priceoverview(name, tries) {
   for (let attempt = 0; attempt < tries; attempt++) {
     try {
       const r = await fetch(priceUrl(name), { headers: { 'User-Agent': UA, ...PROXY_H } });
-      if (r.status === 429) { await sleep(VIA_PROXY ? 1500 * (attempt + 1) : 15000); continue; }   // escalating backoff
-      if (r.ok) { const pj = await r.json(); return (pj && pj.success) ? pj : null; }
+      if (r.status === 429) { await sleep(VIA_PROXY ? 800 * (attempt + 1) : 15000); continue; }   // escalating backoff
+      if (r.ok) return await r.json();   // valid response — success may be true OR false (no market data)
     } catch { /* retry */ }
-    await sleep(VIA_PROXY ? 1000 * (attempt + 1) : 4000);
+    await sleep(VIA_PROXY ? 600 * (attempt + 1) : 4000);
   }
-  return null;
+  return null;   // never reached Steam → leave the persisted value, retry next run
 }
 function applyVol(name, pj) {
-  if (!pj) return false;
-  const vRaw = (pj.volume || '').replace(/[^0-9]/g, '');
-  const mRaw = (pj.median_price || '').replace(/[^0-9.]/g, '');
-  vol.items[name] = { vol: vRaw ? parseInt(vRaw, 10) : 0, medianCents: mRaw ? Math.round(parseFloat(mRaw) * 100) : 0 };
+  if (!pj) return false;                                   // unreachable → keep stale, don't stamp `at`
+  if (pj.success) {
+    const vRaw = (pj.volume || '').replace(/[^0-9]/g, '');
+    const mRaw = (pj.median_price || '').replace(/[^0-9.]/g, '');
+    vol.items[name] = { vol: vRaw ? parseInt(vRaw, 10) : 0, medianCents: mRaw ? Math.round(parseFloat(mRaw) * 100) : 0, at: now };
+  } else {
+    // valid "no market data" answer → record 0 with a timestamp so we stop re-hitting it every run
+    const prev = vol.items[name] || {};
+    vol.items[name] = { vol: 0, medianCents: prev.medianCents || 0, at: now };
+  }
   return true;
 }
 
 const volNames = Object.keys(items);
 if (VIA_PROXY && !process.env.SKIP_VOL) {
+  // stalest first (never-refreshed = at 0); among equally-stale, more-listed (active) items go first
+  const order = volNames.slice().sort((a, b) => {
+    const ta = (vol.items[a] && vol.items[a].at) || 0, tb = (vol.items[b] && vol.items[b].at) || 0;
+    return ta !== tb ? ta - tb : (items[b].qty || 0) - (items[a].qty || 0);
+  });
+  const deadline = Date.now() + VOL_BUDGET_MS;   // budget from here, so a slow sweep doesn't starve volume
   let done = 0, idx = 0;
-  const worker = async () => { while (idx < volNames.length) { const n = volNames[idx++]; if (applyVol(n, await priceoverview(n, 6))) done++; } };
-  await Promise.all(Array.from({ length: 8 }, worker));   // conc 8 + escalating retries ≈ 98% in ~3min (24 throttled to ~79%)
+  const worker = async () => { while (idx < order.length && Date.now() < deadline) { const n = order[idx++]; if (applyVol(n, await priceoverview(n, 3))) done++; } };
+  await Promise.all(Array.from({ length: 8 }, worker));
   vol.at = now;
-  console.log(`refreshed volume/median for ${done}/${volNames.length} items (via proxy)`);
+  console.log(`refreshed volume/median for ${done}/${order.length} items this run (stalest-first, ${Math.round(VOL_BUDGET_MS / 1000)}s budget, via proxy)`);
 } else if (!process.env.SKIP_VOL && volAge >= VOL_REFRESH_MS) {
   let done = 0;
   for (const name of volNames) {
