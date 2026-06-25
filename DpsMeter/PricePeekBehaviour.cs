@@ -6,7 +6,7 @@ namespace TbhDpsMeter
     /// <summary>IMGUI overlay: Steam Community Market price of the item under the native in-game tooltip.
     /// The hovered item is read by HeroProbe.PollHoveredItem; the price/median/volume/7-day history come
     /// from PriceStore (cron-built prices.json on jsDelivr). Shows price, 24h change (波動), median,
-    /// listings, 24h volume, and a mini 7-day price curve. Right-click an item to PIN the box to it (it
+    /// listings, 24h volume, and a mini 7-day price curve. Middle-click an item to PIN the box to it (it
     /// stays put while you move the mouse onto the curve); hovering a curve point then shows that point's
     /// time, price, and change vs now. The adjust key (default F4) pins it visible and draggable to set
     /// its position. Toggled on/off from the F1 control center.</summary>
@@ -43,8 +43,8 @@ namespace TbhDpsMeter
 
                 if (InputCompat.KeyPressed(Plugin.PriceAdjustKey)) _adjust = !_adjust;
 
-                // right-click an item to pin/unpin (the game doesn't use right-click)
-                if (InputCompat.RightPressed())
+                // middle-click an item to pin/unpin (the game doesn't use middle-click)
+                if (InputCompat.MiddlePressed())
                 {
                     int hk = HeroProbe.HoveredKey;
                     if (hk != 0) { if (_pinnedKey == hk) _pinnedKey = 0; else Pin(hk); }
