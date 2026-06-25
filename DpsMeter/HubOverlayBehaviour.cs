@@ -14,6 +14,8 @@ namespace TbhDpsMeter
         public HubOverlayBehaviour(IntPtr ptr) : base(ptr) { }
 
         private const float Pad = 10f;
+        // releases page opened by the footer's [GitHub] button when an update is available
+        private const string ReleasesUrl = "https://github.com/WarmBed/TBH-DPS-dashboard/releases/latest";
         private Rect _rect = new Rect(24, 80, 260, 0);
         private bool _visible, _placed;
         private float _wantX, _wantY;
@@ -26,7 +28,7 @@ namespace TbhDpsMeter
 
         private Rect _closeRect, _handleRect, _scaleDownRect, _scaleUpRect, _hideRect;
         private Rect _fontBigDownRect, _fontBigUpRect, _fontSmDownRect, _fontSmUpRect;
-        private Rect _borderRect;
+        private Rect _borderRect, _githubRect;
         private readonly List<Rect> _swatchRects = new List<Rect>();
         private Rect _settingsRect;
         private bool _settingsOpen;   // collapses the 3 settings rows behind the ⚙ button (session-only)
@@ -78,6 +80,7 @@ namespace TbhDpsMeter
             {
                 if (_closeRect.Contains(m)) { _visible = false; return; }
                 if (_settingsRect.Contains(m)) { _settingsOpen = !_settingsOpen; return; }
+                if (_githubRect.Contains(m)) { try { Application.OpenURL(ReleasesUrl); } catch { } return; }
                 if (_settingsOpen)
                 {
                 if (_scaleDownRect.Contains(m)) { UiScale.Adjust(-UiScale.Step); return; }
@@ -155,7 +158,7 @@ namespace TbhDpsMeter
                 int nIcons = Mathf.Max(1, panels.Count);
                 float iconSz = Mathf.Min(lh + 10f, Mathf.Floor((iw - (nIcons - 1) * gap) / nIcons));
                 if (iconSz < 12f) iconSz = 12f;
-                float h = Pad + lh /*title*/ + lh /*summary*/ + lh * 0.4f /*separator*/ + iconSz /*icon row*/ + (_settingsOpen ? lh * 3 : 0) /*settings/font/border rows*/ + lh /*tooltip*/ + Pad;
+                float h = Pad + lh /*title*/ + lh /*summary*/ + lh * 0.4f /*separator*/ + iconSz /*icon row*/ + (_settingsOpen ? lh * 3 : 0) /*settings/font/border rows*/ + lh /*tooltip*/ + lh /*version footer*/ + Pad;
                 _rect.height = h;
                 _scale = UiScale.Fit(_rect.width, _rect.height);
                 if (!_dragging) { _rect.x = Mathf.Clamp(_wantX, 0f, Mathf.Max(0f, Screen.width - _rect.width * _scale)); _rect.y = Mathf.Clamp(_wantY, 0f, Mathf.Max(0f, Screen.height - _rect.height * _scale)); }
@@ -272,6 +275,20 @@ namespace TbhDpsMeter
                 }
                 else if (panels.Count == 0)
                     GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#8a93a0>{Loc.G("no_runs")}</color>", _tip);
+                cy += lh;
+
+                // version footer: current version, or — when the auto-check found a newer release —
+                // an update prompt with a [GitHub] button that opens the releases page in the browser.
+                _githubRect = new Rect(0, 0, 0, 0);
+                if (Updater.State == Updater.St.Available && !string.IsNullOrEmpty(Updater.LatestVersion))
+                {
+                    GUI.Label(new Rect(ix, cy, iw - 70, lh), $"<color=#FFC857>🔄 v{Updater.LatestVersion} {Loc.G("update_available")}</color>", _dim);
+                    _githubRect = new Rect(x + w - Pad - 64, cy - 1, 64, lh);
+                    GUI.Button(_githubRect, "GitHub", _btn);
+                }
+                else
+                    GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#6b7480>v{Plugin.Version}</color>", _tiny);
+
                 _resize.DrawGrip(_white, _rect);
             }
             catch { }
