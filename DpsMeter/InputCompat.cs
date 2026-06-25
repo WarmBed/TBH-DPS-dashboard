@@ -237,13 +237,15 @@ namespace TbhDpsMeter
         // Sequence counters latch press/release edges so a down+up inside one frame isn't missed.
         private static volatile bool _hookLbDown;
         private static volatile int _hookDownSeq, _hookUpSeq;
-        // Right-button press edge (the game doesn't use right-click; the price overlay uses it to pin an
-        // item). We only record the edge — never swallow it — so the game is unaffected.
-        private static volatile int _hookRbDownSeq;
-        private static int _seenRbDownSeq;
-        private static bool _rbPressed, _rb;
-        private const int WM_RBUTTONDOWN = 0x0204;
-        private const int VK_RBUTTON = 0x02;
+        // Middle-button press edge (the game doesn't use middle-click; the price overlay uses it to pin an
+        // item). We only record the edge — never swallow it — so the game is unaffected. WM_MBUTTONDOWN is
+        // the middle-button CLICK and is distinct from WM_MOUSEWHEEL (the wheel scroll), so panel scrolling
+        // is unaffected.
+        private static volatile int _hookMbDownSeq;
+        private static int _seenMbDownSeq;
+        private static bool _mbPressed, _mb;
+        private const int WM_MBUTTONDOWN = 0x0207;
+        private const int VK_MBUTTON = 0x04;
 
         // Mouse wheel sourced from the hook (Unity input is frozen): accumulated notches (WHEEL_DELTA=120
         // each) + the panel slot the cursor was over. Read & reset on the main thread in Poll().
@@ -274,7 +276,7 @@ namespace TbhDpsMeter
                             if (_swallowEnabled) return (IntPtr)1;   // don't forward to the game or desktop
                         }
                     }
-                    if (msg == WM_RBUTTONDOWN && GameIsForeground()) _hookRbDownSeq++;   // edge only, never swallowed
+                    if (msg == WM_MBUTTONDOWN && GameIsForeground()) _hookMbDownSeq++;   // edge only, never swallowed
                     if (msg == WM_MOUSEWHEEL && GameIsForeground())
                     {
                         var wd = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
@@ -358,7 +360,7 @@ namespace TbhDpsMeter
                     _pressed = _hookDownSeq != _seenDownSeq; _seenDownSeq = _hookDownSeq;
                     _released = _hookUpSeq != _seenUpSeq; _seenUpSeq = _hookUpSeq;
                     _down = _hookLbDown; _lb = _down;
-                    _rbPressed = _hookRbDownSeq != _seenRbDownSeq; _seenRbDownSeq = _hookRbDownSeq;
+                    _mbPressed = _hookMbDownSeq != _seenMbDownSeq; _seenMbDownSeq = _hookMbDownSeq;
                 }
                 else
                 {
@@ -366,7 +368,7 @@ namespace TbhDpsMeter
                     _pressed = lb && !_lb;
                     _released = !lb && _lb;
                     _down = lb; _lb = lb;
-                    bool rb = Key(VK_RBUTTON); _rbPressed = rb && !_rb; _rb = rb;
+                    bool mb = Key(VK_MBUTTON); _mbPressed = mb && !_mb; _mb = mb;
                 }
 
                 bool f9 = Key(VK_F9); _f9Edge = f9 && !_f9; _f9 = f9;
@@ -384,7 +386,7 @@ namespace TbhDpsMeter
                 _fg = GameIsForeground();
                 if (!_fg)
                 {
-                    _pressed = false; _rbPressed = false;
+                    _pressed = false; _mbPressed = false;
                     _f9Edge = false; _pgUpEdge = false; _pgDnEdge = false;
                     _wheel = 0;
                 }
@@ -465,9 +467,9 @@ namespace TbhDpsMeter
         public static bool MousePressed() => _pressed;
         public static bool MouseHeld() => _down;
         public static bool MouseReleased() => _released;
-        /// <summary>Right-button press edge this frame. The game ignores right-click; the price overlay
+        /// <summary>Middle-button press edge this frame. The game ignores middle-click; the price overlay
         /// uses it to pin/unpin the hovered item. Edge only — never swallowed.</summary>
-        public static bool RightPressed() => _rbPressed;
+        public static bool MiddlePressed() => _mbPressed;
         /// <summary>Accumulated mouse-wheel delta this frame (WHEEL_DELTA=120 per notch, + = up) for the
         /// panel at <paramref name="slot"/>; 0 if the wheel wasn't over that panel.</summary>
         public static float WheelDelta(int slot) => _wheel != 0 && _wheelSlot == slot ? _wheel : 0f;

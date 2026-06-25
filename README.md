@@ -140,7 +140,7 @@ against *how fast you were clearing*.
 Hover an item — in your **backpack**, a reward popup, anywhere it has a tooltip — and a small box shows its
 **Steam Community Market** price: current price, **24h change** (波動), **median** sale price, **listings**,
 **24h volume**, and a **7-day price curve**. Prices come from a cron-built feed refreshed every ~30 min, so
-no per-player Steam scraping. **Right-click** an item to **pin** the box to it — it stays put while you move
+no per-player Steam scraping. **Middle-click** an item to **pin** the box to it — it stays put while you move
 the cursor onto the curve, where hovering any point shows that point's **time · price · change vs now**.
 Press **F4** to enter position-adjust mode and drag the box where you want it. Toggle it from the F1 control center.
 
@@ -186,7 +186,7 @@ to it for the text itself, saved as `UI.FontSize` and `UI.FontSizeSmall`.
 - **F4** — toggle the opened-box stats panel (configurable: `BoxOpenUI.ToggleKey`)
 - **F3** — toggle the loot heatmap (configurable: `LootMapUI.ToggleKey`)
 - **F4** — enter the price-box position-adjust (drag) mode (configurable: `Price.AdjustKey`)
-- **Right-click an item** — pin / unpin the price box to it (then hover the curve to read each day)
+- **Middle-click an item** — pin / unpin the price box to it (then hover the curve to read each day)
 - **Mouse drag** — move a panel (positions saved independently; panels never drag off-screen)
 - **Reset** button (top-right) zeroes the meter; **◀ ▶** browse past-stage records
 - **PageUp / PageDown** — adjust panel opacity; **Ctrl + PageUp / PageDown** — scale all panels
