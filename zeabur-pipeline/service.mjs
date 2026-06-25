@@ -45,9 +45,12 @@ function searchUrl(start) {
   return `https://steamcommunity.com/market/search/render/?appid=${APPID}&norender=1&count=${PER}&start=${start}&sort_column=name&sort_dir=asc`;
 }
 async function getPage(start) {
-  for (let a = 0; a < 6; a++) {
-    try { const r = await fetch(searchUrl(start), { headers: { 'User-Agent': UA } }); if (r.ok) return await r.json(); if (r.status === 429) await sleep(2500 * (a + 1)); else await sleep(800 * (a + 1)); }
-    catch { await sleep(1000 * (a + 1)); }
+  // fail fast on a throttled page — the multi-pass sweep re-fetches misses next pass, so don't burn
+  // minutes on long 429 backoffs while the volume loop is also using the IP's budget.
+  for (let a = 0; a < 3; a++) {
+    try { const r = await fetch(searchUrl(start), { headers: { 'User-Agent': UA } }); if (r.ok) return await r.json(); }
+    catch { /* retry */ }
+    await sleep(900 * (a + 1));
   }
   return null;
 }
@@ -69,9 +72,12 @@ async function sweepCatalog() {
   if (first && typeof first.total_count === 'number') total = first.total_count;
   absorb(first);
   const end = total > 0 ? total : 1000;
-  for (let pass = 0; pass < 3; pass++) {
-    for (let start = pass === 0 ? 10 : 0; start <= end; start += 10) { absorb(await getPage(start)); await sleep(100); }
-    if (total && Object.keys(items).length >= total) break;   // full catalog captured
+  let prevCount = -1;
+  for (let pass = 0; pass < 4; pass++) {
+    for (let start = pass === 0 ? 10 : 0; start <= end; start += 10) { absorb(await getPage(start)); await sleep(80); }
+    const c = Object.keys(items).length;
+    if ((total && c >= total) || c === prevCount) break;   // full catalog, or a pass added nothing new
+    prevCount = c;
   }
   return { items, total: total || Object.keys(items).length, currency };
 }
