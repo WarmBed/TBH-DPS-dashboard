@@ -8,12 +8,26 @@ const APPID = 3678970;
 const PER = 100;            // Steam caps search/render at 100 per page
 const UA = 'Mozilla/5.0 (tbh-prices-cron; +https://github.com/WarmBed/TBH-DPS-dashboard)';
 
+// Route Steam through the Cloudflare Worker proxy (worker-tbh-proxy) when configured. GitHub's
+// datacenter IP is heavily rate-limited by Steam — the search sweep stalls at ~131/740 and the
+// priceoverview volume loop 429s and hangs for hours. CF egress is NOT throttled: a full 740 sweep
+// and all volumes take seconds. Falls back to hitting Steam directly when PROXY_BASE is unset.
+const PROXY_BASE = (process.env.PROXY_BASE || '').replace(/\/+$/, '');
+const PROXY_KEY = process.env.PROXY_KEY || '';
+const VIA_PROXY = !!PROXY_BASE;
+const PROXY_H = PROXY_KEY ? { 'x-proxy-key': PROXY_KEY } : {};
+function searchUrl(start) {
+  const q = `appid=${APPID}&norender=1&count=${PER}&start=${start}&sort_column=name&sort_dir=asc`;
+  return VIA_PROXY ? `${PROXY_BASE}/steam/search?${q}` : `https://steamcommunity.com/market/search/render/?${q}`;
+}
+function priceUrl(name) {
+  const q = `appid=${APPID}&currency=1&market_hash_name=${encodeURIComponent(name)}`;
+  return VIA_PROXY ? `${PROXY_BASE}/steam/price?${q}` : `https://steamcommunity.com/market/priceoverview/?${q}`;
+}
+
 async function page(start) {
-  // sort_column=name keeps the order STABLE across calls — without it Steam returns a volatile "popular"
-  // ordering where items shift between pages, so start-windows overlap and miss ~25% of the catalog
-  // (113/150). Stable sort makes each start-window cover a disjoint slice → the full set in one sweep.
-  const url = `https://steamcommunity.com/market/search/render/?appid=${APPID}&norender=1&count=${PER}&start=${start}&sort_column=name&sort_dir=asc`;
-  const res = await fetch(url, { headers: { 'User-Agent': UA } });
+  // sort_column=name keeps the order STABLE across calls so each start-window covers a disjoint slice.
+  const res = await fetch(searchUrl(start), { headers: { 'User-Agent': UA, ...PROXY_H } });
   if (!res.ok) throw new Error(`steam HTTP ${res.status} at start=${start}`);
   return res.json();
 }
@@ -137,35 +151,47 @@ for (const [name, v] of Object.entries(items)) {
   if (win.length) v.hist = win.map(p => [Math.floor(p[0] / 1000), p[1], p[2] || 0]);
 }
 
-// ---- 24h volume + median sale price (priceoverview is per-item & rate-limited, so refresh only every
-// ~6h and persist between the 30-min price runs inside history.vol). ----
+// ---- 24h volume + median sale price (priceoverview, per-item). Through the CF proxy this is cheap and
+// unthrottled, so refresh EVERY run with a small concurrency pool. Direct (no proxy) it's heavily
+// rate-limited, so fall back to the gentle ~6h sequential refresh persisted in history.vol. ----
 const VOL_REFRESH_MS = 6 * 3600 * 1000;
 let vol = (history.vol && history.vol.items) ? history.vol : { at: 0, items: {} };
 const volAge = vol.at ? now - vol.at : Infinity;
-if (volAge >= VOL_REFRESH_MS) {
-  const names = Object.keys(items);
+
+async function priceoverview(name, tries) {
+  for (let attempt = 0; attempt < tries; attempt++) {
+    try {
+      const r = await fetch(priceUrl(name), { headers: { 'User-Agent': UA, ...PROXY_H } });
+      if (r.status === 429) { await sleep(VIA_PROXY ? 1500 : 15000); continue; }
+      if (r.ok) { const pj = await r.json(); return (pj && pj.success) ? pj : null; }
+    } catch { /* retry */ }
+    await sleep(VIA_PROXY ? 800 : 4000);
+  }
+  return null;
+}
+function applyVol(name, pj) {
+  if (!pj) return false;
+  const vRaw = (pj.volume || '').replace(/[^0-9]/g, '');
+  const mRaw = (pj.median_price || '').replace(/[^0-9.]/g, '');
+  vol.items[name] = { vol: vRaw ? parseInt(vRaw, 10) : 0, medianCents: mRaw ? Math.round(parseFloat(mRaw) * 100) : 0 };
+  return true;
+}
+
+const volNames = Object.keys(items);
+if (VIA_PROXY && !process.env.SKIP_VOL) {
+  let done = 0, idx = 0;
+  const worker = async () => { while (idx < volNames.length) { const n = volNames[idx++]; if (applyVol(n, await priceoverview(n, 4))) done++; } };
+  await Promise.all(Array.from({ length: 24 }, worker));   // CF egress isn't throttled → high concurrency
+  vol.at = now;
+  console.log(`refreshed volume/median for ${done}/${volNames.length} items (via proxy)`);
+} else if (!process.env.SKIP_VOL && volAge >= VOL_REFRESH_MS) {
   let done = 0;
-  for (const name of names) {
-    let pj = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const r = await fetch(`https://steamcommunity.com/market/priceoverview/?appid=${APPID}&currency=1&market_hash_name=${encodeURIComponent(name)}`,
-          { headers: { 'User-Agent': UA } });
-        if (r.status === 429) { await sleep(15000); continue; }   // rate-limited: wait and retry
-        if (r.ok) { pj = await r.json(); break; }
-      } catch { /* retry */ }
-      await sleep(4000);
-    }
-    if (pj && pj.success) {
-      const vRaw = (pj.volume || '').replace(/[^0-9]/g, '');
-      const mRaw = (pj.median_price || '').replace(/[^0-9.]/g, '');
-      vol.items[name] = { vol: vRaw ? parseInt(vRaw, 10) : 0, medianCents: mRaw ? Math.round(parseFloat(mRaw) * 100) : 0 };
-      done++;
-    }
+  for (const name of volNames) {
+    if (applyVol(name, await priceoverview(name, 3))) done++;
     await sleep(3500);   // ~17 req/min — stay under Steam's unauthenticated limit
   }
   vol.at = now;
-  console.log(`refreshed volume/median for ${done}/${names.length} items`);
+  console.log(`refreshed volume/median for ${done}/${volNames.length} items (direct)`);
 }
 history.vol = vol;
 for (const [name, v] of Object.entries(items)) {

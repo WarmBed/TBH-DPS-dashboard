@@ -19,12 +19,19 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15            # backstop: Steam can never hang the job (and block the queue) again
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Fetch Steam market prices
+        # Steam heavily rate-limits GitHub's datacenter IP (sweep stalls ~131/740, volume loop hangs),
+        # so route the catalog sweep + priceoverview through the same Cloudflare Worker proxy — CF
+        # egress isn't throttled, so we get the full 740 + all volumes in seconds.
+        env:
+          PROXY_BASE: 'https://tbh-proxy.mike25326799.workers.dev'
+          PROXY_KEY: ${{ secrets.PROXY_KEY }}
         run: node scripts/fetch-prices.mjs
       # The rich Terminal/F4 dataset (full catalog + top-N detail) from tbh-market. Isolated from the
       # price-peek path: if it fails, prices.json still publishes below.
