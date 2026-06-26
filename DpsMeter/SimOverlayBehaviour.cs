@@ -41,11 +41,16 @@ namespace TbhDpsMeter
         private double _avgActiveFrac = 1.0;   // global active-fraction, used to estimate un-cleared stages
         private int _measuredCount;            // stages with a real measured split (for the coverage hint)
 
-        // per-class multiplier (heroKey -> ×); live damage shares (heroKey -> 0..1); display order (share desc)
+        // per-hero ATTACK multiplier (heroKey -> ×, the fitting lever); display order
         private readonly Dictionary<int, double> _mult = new Dictionary<int, double>();
-        private readonly Dictionary<int, double> _shares = new Dictionary<int, double>();
+        private readonly Dictionary<int, double> _shares = new Dictionary<int, double>();   // (legacy, unused)
         private readonly List<int> _order = new List<int>();
         private double _speed = 1.0;
+
+        // per-hero current combat stats + measured DPS (the anchor), from the newest stat-bearing run.
+        // Fitting = adjust a hero's attack -> DamageFormula gives the DPS ratio -> scales the measured DPS.
+        private readonly Dictionary<int, CombatStats> _stats = new Dictionary<int, CombatStats>();
+        private readonly Dictionary<int, double> _measDps = new Dictionary<int, double>();
 
         private string _diff = "NORMAL";
         private int _page;
@@ -87,7 +92,6 @@ namespace TbhDpsMeter
             {
                 InputCompat.SetPanel(Slot, _visible && !GameUiState.MenuOpen(), ScaledRect());
                 if (_visible && RunStore.Version != _seenVersion) Reload();
-                if (_visible) RefreshShares();
                 if (_visible) HandlePointer();
                 else if (_dragging) _dragging = false;
             }
@@ -142,8 +146,43 @@ namespace TbhDpsMeter
                 sumTotal += tt.ActiveSec + tt.IdleSec;
             }
             _avgActiveFrac = sumTotal > 0 ? sumActive / sumTotal : 1.0;
+
+            // fitting baseline: newest run that captured per-hero stats (29-stat) + damage. Each damage
+            // dealer's CombatStats + measured DPS (cdmg/active) become the anchor the formula scales from.
+            _stats.Clear(); _measDps.Clear(); _order.Clear();
+            for (int i = _runs.Count - 1; i >= 0 && _order.Count == 0; i--)
+            {
+                var r = _runs[i];
+                if (r == null || r.Party == null) continue;
+                double active = r.ActiveSeconds > 0 ? r.ActiveSeconds : r.Duration;
+                if (active <= 0) continue;
+                foreach (var snap in r.Party)
+                {
+                    if (snap == null || snap.Stats == null || snap.Stats.Count == 0 || snap.DamageDealt <= 0) continue;
+                    int key;
+                    if (!int.TryParse(snap.Character, out key)) continue;
+                    CombatStats cs;
+                    cs.AttackDamage = StatVal(snap, "attack");
+                    cs.AttackSpeed = StatVal(snap, "aspd");
+                    cs.CritChance = StatVal(snap, "critrate");
+                    cs.CritDamage = StatVal(snap, "critdmg");
+                    cs.Multistrike = StatVal(snap, "Multistrike");
+                    cs.ProjCount = StatVal(snap, "ProjCount");
+                    _stats[key] = cs;
+                    _measDps[key] = snap.DamageDealt / active;
+                    _order.Add(key);
+                }
+            }
             _loaded = true;
             _page = 0;
+        }
+
+        /// <summary>One captured stat value from a snapshot (0 if absent).</summary>
+        private double StatVal(CharacterSnapshot snap, string key)
+        {
+            if (snap == null || snap.Stats == null) return 0;
+            foreach (var s in snap.Stats) if (s.Key == key) return s.Value;
+            return 0;
         }
 
         private List<EfficiencyRow> Filtered()
@@ -301,7 +340,20 @@ namespace TbhDpsMeter
                 float x = _rect.x, ix = x + Pad, w = _rect.width, iw = w - Pad * 2;
 
                 var filtered = Filtered();
-                double F = ClearTimeSim.PartyDpsFactor(_shares, _mult);
+                // party DPS factor from the damage formula: each hero's MEASURED dps scaled by the formula
+                // ratio under its attack adjustment, summed and normalized to the current build.
+                double baseTot = 0, simTot = 0;
+                foreach (int hk in _order)
+                {
+                    double d0; _measDps.TryGetValue(hk, out d0);
+                    if (d0 <= 0) continue;
+                    CombatStats cs0; _stats.TryGetValue(hk, out cs0);
+                    double p0 = DamageFormula.ExpectedDps(cs0);
+                    CombatStats cs1 = cs0; cs1.AttackDamage = cs0.AttackDamage * MultOf(hk);
+                    double ratio = p0 > 0 ? DamageFormula.ExpectedDps(cs1) / p0 : 1.0;
+                    baseTot += d0; simTot += d0 * ratio;
+                }
+                double F = baseTot > 0 ? simTot / baseTot : 1.0;
 
                 // simulate every filtered stage; build a sort order (saved sec or % desc, unknowns last)
                 int nF = filtered.Count;
@@ -385,12 +437,16 @@ namespace TbhDpsMeter
                     for (int i = 0; i < _order.Count; i++)
                     {
                         int key = _order[i];
-                        double share = 0; _shares.TryGetValue(key, out share);
                         double mu = MultOf(key);
+                        CombatStats hcs; _stats.TryGetValue(key, out hcs);
+                        double hd0; _measDps.TryGetValue(key, out hd0);
+                        double hp0 = DamageFormula.ExpectedDps(hcs);
+                        CombatStats hcs1 = hcs; hcs1.AttackDamage = hcs.AttackDamage * mu;
+                        double predDps = hp0 > 0 ? hd0 * DamageFormula.ExpectedDps(hcs1) / hp0 : hd0;
                         DrawRect(ix, cy + lh * 0.32f, 9, 9, ClassColor(key));
                         string nm = HeroProbe.HeroName(key);
                         GUI.Label(new Rect(ix + 14, cy, minusX - (ix + 14), lh),
-                            $"{nm} <size=10><color=#9aa3b0>{share * 100:0.#}%</color></size>", _label);
+                            $"{nm} <size=10><color=#9aa3b0>攻{hcs.AttackDamage * mu:0} → {FmtNum(predDps)}/s</color></size>", _label);
                         var rMinus = new Rect(minusX, cy, ctrlW, lh - 2);
                         var rPlus = new Rect(plusX, cy, ctrlW, lh - 2);
                         GUI.Button(rMinus, "−", _btn);
@@ -540,6 +596,15 @@ namespace TbhDpsMeter
         private static string FmtPct(double frac)
         {
             return (frac * 100).ToString("0.#") + "%";
+        }
+
+        /// <summary>Compact number: 1.2K / 3.4M.</summary>
+        private static string FmtNum(double v)
+        {
+            double a = Math.Abs(v);
+            if (a >= 1e6) return (v / 1e6).ToString("0.#") + "M";
+            if (a >= 1e3) return (v / 1e3).ToString("0.#") + "K";
+            return v.ToString("0");
         }
     }
 }
