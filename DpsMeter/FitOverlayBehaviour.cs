@@ -65,8 +65,14 @@ namespace TbhDpsMeter
         private int _picker = -1;       // slot whose item list is open (-1 = main view)
         private bool _matPicker;        // material-list picker open
         private int _pickerPage;
+        private string _pickGrade = "";  // active grade-filter chip in the picker ("" = all)
         private Rect _addMatRect;
         private readonly List<Rect> _matRmRects = new List<Rect>();
+        private readonly List<Rect> _gradeRects = new List<Rect>();   // grade-chip hitboxes
+        private readonly List<string> _gradeKeys = new List<string>();
+        // TBH's 10-tier rarity ladder (ascending) + short CJK labels, for the picker's grade chips.
+        private static readonly string[] GradeLadder = { "COMMON", "UNCOMMON", "RARE", "LEGENDARY", "IMMORTAL", "ARCANA", "BEYOND", "CELESTIAL", "DIVINE", "COSMIC" };
+        private static readonly string[] GradeLabel = { "普通", "罕見", "稀有", "傳奇", "不朽", "至寶", "超凡", "天界", "神聖", "宇宙" };
 
         private Rect _closeRect, _resetRect, _backRect;
         private readonly List<Rect> _tabRects = new List<Rect>();
@@ -177,6 +183,8 @@ namespace TbhDpsMeter
                 if (_picker >= 0)
                 {
                     if (_backRect.Contains(m)) { _picker = -1; return; }
+                    for (int i = 0; i < _gradeRects.Count && i < _gradeKeys.Count; i++)
+                        if (_gradeRects[i].Contains(m)) { _pickGrade = _gradeKeys[i]; _pickerPage = 0; return; }
                     if (_ppPrev.Contains(m)) { _pickerPage = Mathf.Max(0, _pickerPage - 1); return; }
                     if (_ppNext.Contains(m)) { _pickerPage++; return; }
                     for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
@@ -196,7 +204,7 @@ namespace TbhDpsMeter
                 for (int i = 0; i < _tabRects.Count; i++)
                     if (_tabRects[i].Contains(m)) { _heroIdx = i; _picker = -1; return; }
                 for (int i = 0; i < _swapRects.Count; i++)
-                    if (_swapRects[i].Contains(m)) { _picker = i; _pickerPage = 0; return; }
+                    if (_swapRects[i].Contains(m)) { _picker = i; _pickerPage = 0; _pickGrade = ""; return; }
                 if (_addMatRect.Contains(m)) { _matPicker = true; _pickerPage = 0; return; }
                 for (int i = 0; i < _matRmRects.Count; i++)
                     if (_matRmRects[i].Contains(m)) { RemoveMat(i); return; }
@@ -410,7 +418,31 @@ namespace TbhDpsMeter
                     list = f;
                 }
             }
-            int per = 8; float rowH = lh * 1.7f;
+            // --- grade-filter chips (so the user isn't paging through 200+ items) ---
+            var present = new HashSet<string>();
+            foreach (var g in list) present.Add(g.Grade);
+            _gradeRects.Clear(); _gradeKeys.Clear();
+            float chx = ix, chy = cy, chh = lh - 1, cw = 44, gap = 3;
+            DrawRect(chx, chy, cw, chh, _pickGrade == "" ? new Color(0.30f, 0.45f, 0.75f, 0.50f) : new Color(1, 1, 1, 0.06f));
+            GUI.Label(new Rect(chx + 6, chy, cw, chh), "<size=11>全部</size>", _label);
+            _gradeRects.Add(new Rect(chx, chy, cw, chh)); _gradeKeys.Add(""); chx += cw + gap;
+            for (int gi = 0; gi < GradeLadder.Length; gi++)
+            {
+                if (!present.Contains(GradeLadder[gi])) continue;
+                if (chx + cw > ix + iw) { chx = ix; chy += chh + 2; }
+                bool act = _pickGrade == GradeLadder[gi];
+                DrawRect(chx, chy, cw, chh, act ? new Color(0.30f, 0.45f, 0.75f, 0.50f) : new Color(1, 1, 1, 0.06f));
+                GUI.Label(new Rect(chx + 6, chy, cw, chh), $"<size=11><color=#{GradeHex(GradeLadder[gi])}>{GradeLabel[gi]}</color></size>", _label);
+                _gradeRects.Add(new Rect(chx, chy, cw, chh)); _gradeKeys.Add(GradeLadder[gi]); chx += cw + gap;
+            }
+            cy = chy + chh + 3;
+            if (_pickGrade != "")
+            {
+                var fg = new List<GearTemplate>();
+                foreach (var g in list) if (g.Grade == _pickGrade) fg.Add(g);
+                list = fg;
+            }
+            int per = 7; float rowH = lh * 1.7f;
             int pages = Mathf.Max(1, (list.Count + per - 1) / per);
             _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
             int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
