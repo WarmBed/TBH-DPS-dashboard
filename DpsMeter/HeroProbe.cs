@@ -298,14 +298,19 @@ namespace TbhDpsMeter
     /// Best-effort: fills what it can, logs diagnostics when Debug.LogSnapshot is on.</summary>
     internal static class HeroProbe
     {
-        // friendly key per StatType int (subset shown in the compare panel)
+        // friendly key per StatType int (ints match SaveGearReader.StatNames — same TaskbarHero.StatType
+        // enum). Extended beyond the compare-panel subset to capture every damage-formula input the
+        // fitting predictor needs (per-element %, multistrike, projectiles, per-delivery dmg%, cast/cdr…).
         private static readonly (int stat, string key)[] StatMap =
         {
             (1, "attack"), (2, "aspd"), (3, "critrate"), (4, "critdmg"),
             (5, "hp"), (6, "armor"), (7, "mspd"),
+            (8, "AoE"), (10, "cdr"), (16, "Dodge"), (17, "Block"), (20, "Multistrike"),
+            (21, "HpLeech"), (22, "ProjCount"), (23, "HpRegen"),
+            (24, "Phys%"), (25, "Fire%"), (26, "Cold%"), (27, "Light%"), (28, "Chaos%"),
+            (12, "FireRes"), (13, "ColdRes"), (14, "LightRes"), (15, "ChaosRes"),
+            (49, "CastSpd"), (53, "ProjDmg"), (54, "MeleeDmg"), (55, "AoEDmg"), (56, "SummonDmg"),
         };
-        // candidate "get final stat value" getters on the stat container (xe), in confidence order
-        private static readonly string[] StatGetters = { "nsc", "kaq", "kar", "kap" };
         private static readonly string[] GearModSlots = { "bdzh", "bdzi", "bdzj", "bdzk", "bdzl" };
         private static readonly string[] SkillLevelGetters = { "jjy", "jjz", "jka", "jkb", "jke", "jkf", "jkg", "jkh", "jki", "jkm" };
 
@@ -1025,46 +1030,167 @@ namespace TbhDpsMeter
             catch (Exception e) { Plugin.Logger?.LogWarning("ReadIdentity: " + e.Message); }
         }
 
+        // --- live total stats (attack/critrate/aspd/...) ---------------------------------------
+        // The hero's computed stat block lives on its Unit, NOT on cache:
+        //     Unit.gqc() -> vi  (stats component)
+        //     vi.bfbe    -> yu  (the stat block)
+        //     yu.M(StatType) -> Single   (one method per aggregation view: base / final-total / mods)
+        // ALL of gqc/bfbe/M are obfuscated names that churn every game update (the old cache.beib + xe +
+        // nsc/kaq/kar/kap path is gone), so resolve the whole chain BY SHAPE and verify by value:
+        //   * stat block  = a type exposing a 'Single M(StatType)' getter
+        //   * vi          = the only no-arg game-class accessor on the unit that returns such a holder
+        //   * the getter  = the final-total view, = argmax(AttackDamage) among getters with MaxHp > 0
+        //     (base/additive-mod/multiplier views all read smaller-or-equal for a flat stat like attack).
+        // Resolve once, cache the chain, self-heal on rename, and log a [selfcheck] line.
+        private static System.Reflection.MemberInfo _statUnitAccessor;   // unit -> vi
+        private static System.Reflection.MemberInfo _statBlockAccessor;  // vi   -> yu
+        private static System.Reflection.MethodInfo _statGetter;         // yu.M(StatType) -> Single
+
         public static void ReadStats(Hero hero, CharacterSnapshot snap)
         {
             try
             {
-                var cache = Refl.Get(hero, "cache");
-                var stats = Refl.Get(cache, "beib");          // xe
-                if (stats == null) return;
-                string getter = PickStatGetter(stats);
-                if (getter == null) return;
+                var block = ResolveStatBlock(hero);
+                if (block == null || _statGetter == null) return;
 
                 foreach (var (stat, key) in StatMap)
                 {
                     var arg = EnumVal(stat);
                     if (arg == null) continue;
-                    var v = Refl.Call(stats, getter, arg);
-                    if (v != null) snap.Stats.Add(new StatEntry(key, Refl.ToD(v)));
+                    double v = InvokeGetter(block, arg);
+                    if (!double.IsNaN(v)) snap.Stats.Add(new StatEntry(key, v));
                 }
 
                 if (Plugin.DebugSnapshot != null && Plugin.DebugSnapshot.Value)
-                {
-                    var arg = EnumVal(5); // MaxHp
-                    foreach (var g in StatGetters)
-                        Plugin.Logger?.LogInfo($"[snap stat getter] {g}(MaxHp) = {Refl.ToD(Refl.Call(stats, g, arg))}");
-                }
+                    LogStatGetters(block);
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("ReadStats: " + e.Message); }
         }
 
-        private static string PickStatGetter(object stats)
+        /// <summary>Walks unit -> vi -> yu, resolving the obfuscated chain by return-type shape on first use
+        /// and caching it. Returns the live stat block (yu) or null. Re-scans each call until it resolves so
+        /// a not-yet-initialised hero early in a run self-heals on the next snapshot.</summary>
+        private static object ResolveStatBlock(Hero hero)
         {
-            var arg = EnumVal(5); // MaxHp should be > 0 for a live hero
-            foreach (var g in StatGetters)
+            if (hero == null) return null;
+            if (_statUnitAccessor != null && _statBlockAccessor != null && _statGetter != null)
+                return InvokeNoArg(InvokeNoArg(hero, _statUnitAccessor), _statBlockAccessor);
+
+            foreach (var a1 in NoArgRefAccessors(hero.GetType()))     // unit -> ? (candidate vi)
             {
-                var v = Refl.Call(stats, g, arg);
-                if (v != null && Refl.ToD(v) > 0) return g;
+                if (!IsGameClass(AccessorType(a1))) continue;
+                object vi = null;
+                foreach (var a2 in NoArgRefAccessors(AccessorType(a1)))  // vi -> ? (candidate yu)
+                {
+                    if (!HasStatGetter(AccessorType(a2))) continue;
+                    if (vi == null) vi = InvokeNoArg(hero, a1);
+                    var block = InvokeNoArg(vi, a2);
+                    var getter = PickStatGetter(block);
+                    if (getter == null) continue;
+                    _statUnitAccessor = a1; _statBlockAccessor = a2; _statGetter = getter;
+                    Plugin.Logger?.LogInfo($"[selfcheck] live stat block -> Unit.{a1.Name} -> {AccessorType(a1).Name}.{a2.Name} -> {block.GetType().Name}.{getter.Name}(StatType)");
+                    return block;
+                }
             }
-            // fall back to the first that simply exists
-            foreach (var g in StatGetters)
-                if (Refl.Call(stats, g, arg) != null) return g;
             return null;
+        }
+
+        /// <summary>Pick the final-total getter on a stat block (yu): the 'Single M(StatType)' method whose
+        /// AttackDamage is largest among those returning a live MaxHp (&gt; 0). Null if stats aren't live yet.</summary>
+        private static System.Reflection.MethodInfo PickStatGetter(object block)
+        {
+            if (block == null) return null;
+            var hpArg = EnumVal(5);   // MaxHp        — gates "is this a live stat view"
+            var atkArg = EnumVal(1);  // AttackDamage — disambiguates base vs final-total view
+            System.Reflection.MethodInfo best = null; double bestAtk = double.NegativeInfinity;
+            foreach (var m in StatGetterMethods(block.GetType()))
+            {
+                double hp = InvokeGetter(block, m, hpArg);
+                if (!(hp > 0)) continue;
+                double atk = InvokeGetter(block, m, atkArg);
+                if (double.IsNaN(atk)) continue;
+                if (atk > bestAtk) { bestAtk = atk; best = m; }
+            }
+            return best;
+        }
+
+        private static void LogStatGetters(object block)
+        {
+            object hp = EnumVal(5), atk = EnumVal(1), cr = EnumVal(3);
+            foreach (var m in StatGetterMethods(block.GetType()))
+                Plugin.Logger?.LogInfo($"[snap stat getter] {m.Name}: MaxHp={InvokeGetter(block, m, hp):0.##} Atk={InvokeGetter(block, m, atk):0.##} Crit={InvokeGetter(block, m, cr):0.###}{(m == _statGetter ? "  <- used" : "")}");
+        }
+
+        // 'Single M(StatType)' (or Obscured-numeric) instance getters on the stat block.
+        private static IEnumerable<System.Reflection.MethodInfo> StatGetterMethods(Type t)
+        {
+            foreach (var m in t.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+            {
+                var ps = m.GetParameters();
+                if (ps.Length == 1 && ps[0].ParameterType.Name == "StatType" && IsNumericReturn(m.ReturnType))
+                    yield return m;
+            }
+        }
+
+        private static bool HasStatGetter(Type t)
+        {
+            if (t == null || t.IsPrimitive || t.IsEnum || t.IsValueType || t == typeof(string)) return false;
+            try { foreach (var _ in StatGetterMethods(t)) return true; } catch { }
+            return false;
+        }
+
+        // No-arg readable accessors (properties + zero-arg non-get_ methods) that return a reference type —
+        // candidates for hops in the unit -> vi -> yu chain. Pure metadata; nothing is invoked here.
+        private static IEnumerable<System.Reflection.MemberInfo> NoArgRefAccessors(Type t)
+        {
+            if (t == null) yield break;
+            System.Reflection.PropertyInfo[] props = null;
+            try { props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance); } catch { }
+            if (props != null)
+                foreach (var p in props)
+                    if (p.CanRead && p.GetIndexParameters().Length == 0 && IsRef(p.PropertyType)) yield return p;
+            System.Reflection.MethodInfo[] meths = null;
+            try { meths = t.GetMethods(BindingFlags.Public | BindingFlags.Instance); } catch { }
+            if (meths != null)
+                foreach (var m in meths)
+                    if (m.GetParameters().Length == 0 && IsRef(m.ReturnType)
+                        && !m.Name.StartsWith("get_", StringComparison.Ordinal)
+                        && m.Name != "GetType" && m.Name != "ToString" && m.Name != "MemberwiseClone")
+                        yield return m;
+        }
+
+        private static bool IsRef(Type t) => t != null && !t.IsPrimitive && !t.IsEnum && t != typeof(string) && t != typeof(void);
+
+        // A game (Assembly-CSharp) class — excludes Unity/System/Il2Cpp types so we never invoke their getters.
+        private static bool IsGameClass(Type t)
+        {
+            if (t == null || t.IsPrimitive || t.IsEnum || t.IsValueType || t == typeof(string)) return false;
+            string ns = t.Namespace ?? "";
+            return !(ns.StartsWith("System", StringComparison.Ordinal) || ns.StartsWith("UnityEngine", StringComparison.Ordinal)
+                  || ns.StartsWith("Unity", StringComparison.Ordinal) || ns.StartsWith("Il2Cpp", StringComparison.Ordinal)
+                  || ns.StartsWith("TMPro", StringComparison.Ordinal));
+        }
+
+        private static Type AccessorType(System.Reflection.MemberInfo m)
+            => (m as System.Reflection.PropertyInfo)?.PropertyType ?? (m as System.Reflection.MethodInfo)?.ReturnType;
+
+        private static object InvokeNoArg(object obj, System.Reflection.MemberInfo m)
+        {
+            if (obj == null || m == null) return null;
+            try
+            {
+                if (m is System.Reflection.PropertyInfo p) return p.GetValue(obj);
+                if (m is System.Reflection.MethodInfo mi) return mi.Invoke(obj, null);
+            }
+            catch { }
+            return null;
+        }
+
+        private static double InvokeGetter(object block, object statArg) => InvokeGetter(block, _statGetter, statArg);
+        private static double InvokeGetter(object block, System.Reflection.MethodInfo m, object statArg)
+        {
+            if (block == null || m == null || statArg == null) return double.NaN;
+            try { return Refl.ToD(m.Invoke(block, new[] { statArg })); } catch { return double.NaN; }
         }
 
         private static object EnumVal(int i)

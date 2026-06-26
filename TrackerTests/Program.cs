@@ -139,6 +139,7 @@ class Tests
         FarmTests();
         FarmDivisorTests();
         ClearTimeSimTests();
+        DamageFormulaTests();
         RunRetentionTests();
         WavDecoderTests();
 
@@ -728,6 +729,21 @@ class Tests
         Check("[sim] BuildStat per-hero attack (mage = 50)", Near(ClearTimeSim.BuildStat(run, "attack", "301"), 50), ClearTimeSim.BuildStat(run, "attack", "301"));
         Check("[sim] BuildStat missing stat -> 0", Near(ClearTimeSim.BuildStat(run, "mspd", "301"), 0), ClearTimeSim.BuildStat(run, "mspd", "301"));
         Check("[sim] BuildStat unknown hero -> 0", Near(ClearTimeSim.BuildStat(run, "AoE", "999"), 0), ClearTimeSim.BuildStat(run, "AoE", "999"));
+    }
+
+    // ================= DamageFormula (slot for the native-decompiled combat formula) =================
+    static void DamageFormulaTests()
+    {
+        Console.WriteLine("\n-- DamageFormula --");
+        // expected crit multiplier on average damage = 1 + chance×(critDamage−1)
+        Check("[dmg] crit 12% ×3.57 -> 1.308", Near(DamageFormula.CritMultiplier(0.12, 3.57), 1.3084, 0.001), DamageFormula.CritMultiplier(0.12, 3.57));
+        Check("[dmg] 0% crit -> 1.0", Near(DamageFormula.CritMultiplier(0, 5), 1.0), DamageFormula.CritMultiplier(0, 5));
+        Check("[dmg] 100% crit ×2 -> 2.0", Near(DamageFormula.CritMultiplier(1.0, 2.0), 2.0), DamageFormula.CritMultiplier(1.0, 2.0));
+        Check("[dmg] critDamage<1 clamped (no negative crit)", Near(DamageFormula.CritMultiplier(0.5, 0.5), 1.0), DamageFormula.CritMultiplier(0.5, 0.5));
+        Check("[dmg] chance>1 clamped to 1", Near(DamageFormula.CritMultiplier(2.0, 2.0), 2.0), DamageFormula.CritMultiplier(2.0, 2.0));
+        // placeholder ExpectedDps folds crit in: attack × aspd × critMult (real formula replaces this body)
+        var cs = new CombatStats { AttackDamage = 1000, AttackSpeed = 2, CritChance = 0, CritDamage = 3 };
+        Check("[dmg] placeholder dps = atk×aspd (no crit) = 2000", Near(DamageFormula.ExpectedDps(cs), 2000), DamageFormula.ExpectedDps(cs));
     }
 
     // ================= RunRetention (per-stage history) =================

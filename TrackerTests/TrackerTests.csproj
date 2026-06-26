@@ -17,6 +17,7 @@
     <Compile Include="..\DpsMeter\FarmData.cs" />
     <Compile Include="..\DpsMeter\FarmPlanner.cs" />
     <Compile Include="..\DpsMeter\ClearTimeSim.cs" />
+    <Compile Include="..\DpsMeter\DamageFormula.cs" />
     <Compile Include="..\DpsMeter\RunRetention.cs" />
     <Compile Include="..\DpsMeter\WavDecoder.cs" />
     <Compile Include="..\DpsMeter\BoxModels.cs" />
