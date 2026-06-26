@@ -391,6 +391,19 @@ namespace TbhDpsMeter
             GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{SlotLabel[_picker]} — 選擇裝備</color>", _label);
             cy += lh;
             var list = GearDatabase.BySlot(SlotParts[_picker]);
+            // weapon slots hold many gear TYPES (sword/bow/staff…); a class can only use its own type,
+            // so restrict the list to the type the hero currently has equipped (e.g. ranger -> BOW only).
+            if (_picker == 0 || _picker == 1)
+            {
+                int eq = (_orig.TryGetValue(hero, out var oa) && _picker < oa.Length) ? oa[_picker] : 0;
+                var eg = GearDatabase.ByKey(eq);
+                if (eg != null && !string.IsNullOrEmpty(eg.Type))
+                {
+                    var f = new List<GearTemplate>();
+                    foreach (var g in list) if (g.Type == eg.Type) f.Add(g);
+                    list = f;
+                }
+            }
             int per = 12; int pages = Mathf.Max(1, (list.Count + per - 1) / per);
             _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
             int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
