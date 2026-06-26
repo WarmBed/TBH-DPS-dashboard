@@ -448,6 +448,9 @@ namespace TbhDpsMeter
             int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
             _pickRects.Clear(); _pickKeys.Clear();
             int curKey = (_load.TryGetValue(hero, out var arr) && _picker < arr.Length) ? arr[_picker] : 0;
+            // the variant the hero actually owns in this slot (each item ships as 2 inherent-roll variants);
+            // mark it so the user can tell theirs apart from its twin.
+            int ownedKey = (_orig.TryGetValue(hero, out var oa2) && _picker < oa2.Length) ? oa2[_picker] : 0;
             for (int i = 0; i < shown; i++)
             {
                 var g = list[start + i]; var r = new Rect(ix, cy, iw, rowH - 1);
@@ -459,8 +462,9 @@ namespace TbhDpsMeter
                 if (tex != null) GUI.DrawTexture(iconR, tex, ScaleMode.ScaleToFit);
                 else { var pc = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconR, _white); GUI.color = pc; }
                 float tx = ix + rowH + 2;
-                // name in its grade colour at full size, stat summary beneath
-                GUI.Label(new Rect(tx, cy + 1, iw - rowH - 6, lh), $"<color=#{GradeHex(g.Grade)}><b>{Nm(g.Key)}</b></color>", _label);
+                // name in its grade colour at full size (✓ = the variant you own), stat summary beneath
+                string own = g.Key == ownedKey ? "<color=#7fffa0>✓</color> " : "";
+                GUI.Label(new Rect(tx, cy + 1, iw - rowH - 6, lh), $"{own}<color=#{GradeHex(g.Grade)}><b>{Nm(g.Key)}</b></color>", _label);
                 string stats = "";
                 foreach (var st in g.Stats) stats += $"{st.Stat.Substring(0, Math.Min(4, st.Stat.Length))}{(st.Mod == "FLAT" ? "+" : (st.Mod == "ADDITIVE" ? "%+" : "×"))}{st.Value:0}　";
                 GUI.Label(new Rect(tx, cy + lh - 1, iw - rowH - 6, lh), $"<size=10><color=#8a93a0>{stats}</color></size>", _tiny);

@@ -359,8 +359,8 @@ namespace TbhDpsMeter
                 case "COSMIC": return "FF4D6D";      // red-pink
                 case "DIVINE": return "FFD24D";      // gold
                 case "CELESTIAL": return "63E6E2";   // cyan
-                case "BEYOND": return "B197FC";      // violet
-                case "ARCANA": return "F783AC";      // pink
+                case "BEYOND": return "F783AC";      // pink (matches in-game 超凡)
+                case "ARCANA": return "B197FC";      // violet (matches in-game 至寶)
                 case "IMMORTAL": return "FF922B";    // orange
                 case "LEGENDARY": return "FFB13B";   // amber
                 case "RARE": return "4FA8FF";        // blue
