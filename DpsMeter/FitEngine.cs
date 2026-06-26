@@ -18,20 +18,26 @@ namespace TbhDpsMeter
         public int Key;
         public string Type = "";    // GEARTYPE: BOW/STAFF/RING/...
         public string Grade = "";
+        public string GearGroup = ""; // WEAPON / ARMOR / ACCESSORY — picks which socket-material effect applies
         public int Level;
         public string Slot = "";    // PARTS: MAIN_WEAPON/SUB_WEAPON/HELMET/...
         public string NameKey = "";
         public readonly List<GearStat> Stats = new List<GearStat>();
     }
 
-    /// <summary>One tier of a decoration/socket material (StatModInfoData): the stat it grants at that tier.</summary>
-    public struct MatTier
+    /// <summary>A socketable material (decoration/engraving/inscription). Its effect depends on the gear group
+    /// (weapon/armor/accessory) it is socketed into, pre-resolved from StatModGroup → StatMod tier.</summary>
+    public sealed class SockMat
     {
-        public int Tier;
-        public string Stat;
-        public string Mod;
-        public double Min, Max;
-        public double Mid => (Min + Max) / 2.0;
+        public int Key;
+        public char Type;        // 'D' decoration / 'E' engraving / 'I' inscription
+        public string NameKey = "";
+        public GearStat W, A, C; // effect on weapon / armor / accessory (default Stat=="" if none)
+        public int WTier, ATier, CTier;
+        public bool HasW, HasA, HasC;
+        public bool HasFor(string gearGroup) => gearGroup == "WEAPON" ? HasW : (gearGroup == "ARMOR" ? HasA : HasC);
+        public GearStat Effect(string gearGroup) => gearGroup == "WEAPON" ? W : (gearGroup == "ARMOR" ? A : C);
+        public int TierFor(string gearGroup) => gearGroup == "WEAPON" ? WTier : (gearGroup == "ARMOR" ? ATier : CTier);
     }
 
     /// <summary>The fitting item/material database, parsed from the bundled fit_gear.json / fit_mats.json
@@ -42,13 +48,11 @@ namespace TbhDpsMeter
         private static readonly List<GearTemplate> _all = new List<GearTemplate>();
         private static readonly Dictionary<int, GearTemplate> _byKey = new Dictionary<int, GearTemplate>();
         private static readonly Dictionary<string, List<GearTemplate>> _bySlot = new Dictionary<string, List<GearTemplate>>();
-        private static readonly Dictionary<int, List<MatTier>> _mats = new Dictionary<int, List<MatTier>>();
-        private static readonly List<int> _matKeyList = new List<int>();
         public static bool Loaded { get; private set; }
 
         public static void Reset()
         {
-            _all.Clear(); _byKey.Clear(); _bySlot.Clear(); _mats.Clear(); _matKeyList.Clear(); Loaded = false;
+            _all.Clear(); _byKey.Clear(); _bySlot.Clear(); Loaded = false;
         }
 
         /// <summary>Parse fit_gear.json (array of {k,t,g,l,p,n,s:[[stat,mod,val]...]}).</summary>
@@ -63,6 +67,7 @@ namespace TbhDpsMeter
                     Key = (int)Json.Num(Json.Get(it, "k")),
                     Type = Json.Str(Json.Get(it, "t")) ?? "",
                     Grade = Json.Str(Json.Get(it, "g")) ?? "",
+                    GearGroup = Json.Str(Json.Get(it, "gg")) ?? "",
                     Level = (int)Json.Num(Json.Get(it, "l")),
                     Slot = Json.Str(Json.Get(it, "p")) ?? "",
                     NameKey = Json.Str(Json.Get(it, "n")) ?? "",
@@ -86,41 +91,74 @@ namespace TbhDpsMeter
             Loaded = true;
         }
 
-        /// <summary>Parse fit_mats.json ({ "StatModKey": [[tier,stat,mod,min,max]...] }).</summary>
-        public static void LoadMats(string json)
+        public static int Count => _all.Count;
+        public static GearTemplate ByKey(int key) { _byKey.TryGetValue(key, out var g); return g; }
+        public static List<GearTemplate> BySlot(string slot) { _bySlot.TryGetValue(slot ?? "", out var l); return l ?? new List<GearTemplate>(); }
+        public static IReadOnlyList<GearTemplate> All => _all;
+    }
+
+    /// <summary>Per-grade socket counts (GradeInfoData): how many decoration / engraving / inscription sockets a
+    /// gear item of each grade has. Parsed from fit_sockets.json ({ "GRADE": [deco, engrave, inscribe] }).</summary>
+    public static class SocketDb
+    {
+        private static readonly Dictionary<string, int[]> _g = new Dictionary<string, int[]>();
+        public static void Load(string json)
         {
+            _g.Clear();
+            var obj = Json.Obj(Json.Parse(json));
+            if (obj == null) return;
+            foreach (var kv in obj)
+            {
+                var a = Json.Arr(kv.Value);
+                _g[kv.Key] = new int[] { a != null && a.Count > 0 ? (int)Json.Num(a[0]) : 0,
+                                         a != null && a.Count > 1 ? (int)Json.Num(a[1]) : 0,
+                                         a != null && a.Count > 2 ? (int)Json.Num(a[2]) : 0 };
+            }
+        }
+        /// <summary>[deco, engrave, inscribe] socket counts for a grade (all-zero if unknown).</summary>
+        public static int[] Counts(string grade) { _g.TryGetValue(grade ?? "", out var c); return c ?? new int[3]; }
+    }
+
+    /// <summary>The socket-material catalog (fit_mats.json): each material item with its type and pre-resolved
+    /// per-gear-group effect. { "matKey": { t, n, w:[stat,mod,val,tier], a:[...], c:[...] } }.</summary>
+    public static class MatCatalog
+    {
+        private static readonly Dictionary<int, SockMat> _byKey = new Dictionary<int, SockMat>();
+        private static readonly Dictionary<char, List<SockMat>> _byType = new Dictionary<char, List<SockMat>>();
+
+        public static void Load(string json)
+        {
+            _byKey.Clear(); _byType.Clear();
             var obj = Json.Obj(Json.Parse(json));
             if (obj == null) return;
             foreach (var kv in obj)
             {
                 int key; if (!int.TryParse(kv.Key, out key)) continue;
-                var tiers = new List<MatTier>();
-                var arr = Json.Arr(kv.Value);
-                if (arr != null)
-                    foreach (var t in arr)
-                    {
-                        var row = Json.Arr(t);
-                        if (row == null || row.Count < 5) continue;
-                        tiers.Add(new MatTier
-                        {
-                            Tier = (int)Json.Num(row[0]),
-                            Stat = Json.Str(row[1]) ?? "",
-                            Mod = Json.Str(row[2]) ?? "FLAT",
-                            Min = Json.Num(row[3]),
-                            Max = Json.Num(row[4]),
-                        });
-                    }
-                _mats[key] = tiers;
-                _matKeyList.Add(key);
+                var o = kv.Value;
+                var m = new SockMat
+                {
+                    Key = key,
+                    Type = (Json.Str(Json.Get(o, "t")) ?? "D")[0],
+                    NameKey = Json.Str(Json.Get(o, "n")) ?? "",
+                };
+                ReadEff(Json.Get(o, "w"), ref m.W, ref m.WTier, ref m.HasW);
+                ReadEff(Json.Get(o, "a"), ref m.A, ref m.ATier, ref m.HasA);
+                ReadEff(Json.Get(o, "c"), ref m.C, ref m.CTier, ref m.HasC);
+                _byKey[key] = m;
+                if (!_byType.TryGetValue(m.Type, out var l)) { l = new List<SockMat>(); _byType[m.Type] = l; }
+                l.Add(m);
             }
         }
-
-        public static int Count => _all.Count;
-        public static GearTemplate ByKey(int key) { _byKey.TryGetValue(key, out var g); return g; }
-        public static List<GearTemplate> BySlot(string slot) { _bySlot.TryGetValue(slot ?? "", out var l); return l ?? new List<GearTemplate>(); }
-        public static List<MatTier> Material(int key) { _mats.TryGetValue(key, out var l); return l ?? new List<MatTier>(); }
-        public static IReadOnlyList<int> MaterialKeys => _matKeyList;
-        public static IReadOnlyList<GearTemplate> All => _all;
+        private static void ReadEff(object node, ref GearStat g, ref int tier, ref bool has)
+        {
+            var a = Json.Arr(node);
+            if (a == null || a.Count < 3) { has = false; return; }
+            g = new GearStat(Json.Str(a[0]) ?? "", Json.Str(a[1]) ?? "FLAT", Json.Num(a[2]));
+            tier = a.Count > 3 ? (int)Json.Num(a[3]) : 0;
+            has = true;
+        }
+        public static SockMat Get(int key) { _byKey.TryGetValue(key, out var m); return m; }
+        public static List<SockMat> ByType(char t) { _byType.TryGetValue(t, out var l); return l ?? new List<SockMat>(); }
     }
 
     /// <summary>High-level fitting helpers: turn a loadout (the equipped item keys) into aggregated stats,
@@ -161,34 +199,33 @@ namespace TbhDpsMeter
             return DamageFormula.ExpectedDps(ToCombat(LoadoutStats(itemKeys)));
         }
 
-        /// <summary>The stat lines granted by a set of applied materials, each given as [StatModKey, Tier].</summary>
-        public static List<GearStat> MaterialStats(IEnumerable<int[]> mats)
+        /// <summary>Gear stats + socketed-material effects for a loadout. gearBySlot[s] = item key; sockets[s] =
+        /// the material keys plugged into slot s (resolved against that item's gear group).</summary>
+        public static List<GearStat> CollectLines(int[] gearBySlot, Dictionary<int, int[]> sockets)
         {
             var lines = new List<GearStat>();
-            if (mats != null)
-                foreach (var mt in mats)
-                {
-                    if (mt == null || mt.Length < 2) continue;
-                    foreach (var t in GearDatabase.Material(mt[0]))
-                        if (t.Tier == mt[1]) { lines.Add(new GearStat(t.Stat, t.Mod, t.Mid)); break; }
-                }
+            if (gearBySlot == null) return lines;
+            for (int s = 0; s < gearBySlot.Length; s++)
+            {
+                var g = GearDatabase.ByKey(gearBySlot[s]);
+                if (g == null) continue;
+                lines.AddRange(g.Stats);
+                if (sockets != null && sockets.TryGetValue(s, out var socks) && socks != null)
+                    foreach (var mk in socks)
+                    {
+                        if (mk == 0) continue;
+                        var m = MatCatalog.Get(mk);
+                        if (m != null && m.HasFor(g.GearGroup)) lines.Add(m.Effect(g.GearGroup));
+                    }
+            }
             return lines;
         }
 
-        /// <summary>Aggregate gear loadout + applied materials together.</summary>
-        public static Dictionary<string, double> LoadoutStats(IEnumerable<int> itemKeys, IEnumerable<int[]> mats)
-        {
-            var lines = new List<GearStat>();
-            if (itemKeys != null)
-                foreach (var k in itemKeys) { var g = GearDatabase.ByKey(k); if (g != null) lines.AddRange(g.Stats); }
-            lines.AddRange(MaterialStats(mats));
-            return StatAggregator.Aggregate(lines);
-        }
+        public static Dictionary<string, double> LoadoutStats(int[] gearBySlot, Dictionary<int, int[]> sockets)
+            => StatAggregator.Aggregate(CollectLines(gearBySlot, sockets));
 
-        public static double LoadoutDps(IEnumerable<int> itemKeys, IEnumerable<int[]> mats)
-        {
-            return DamageFormula.ExpectedDps(ToCombat(LoadoutStats(itemKeys, mats)));
-        }
+        public static double LoadoutDps(int[] gearBySlot, Dictionary<int, int[]> sockets)
+            => DamageFormula.ExpectedDps(ToCombat(LoadoutStats(gearBySlot, sockets)));
     }
 
     /// <summary>Aggregates a set of gear/material stat lines into a per-StatType total, PoE-style:

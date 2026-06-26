@@ -16,7 +16,8 @@ namespace TbhDpsMeter
             {
                 var asm = typeof(FitDataStore).Assembly;
                 GearDatabase.LoadGear(ReadRes(asm, "fit_gear.json"));
-                GearDatabase.LoadMats(ReadRes(asm, "fit_mats.json"));
+                MatCatalog.Load(ReadRes(asm, "fit_mats.json"));
+                SocketDb.Load(ReadRes(asm, "fit_sockets.json"));
                 Plugin.Logger?.LogInfo($"[fit] gear DB: {GearDatabase.Count} items loaded");
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("FitDataStore: " + e.Message); }
@@ -54,7 +55,7 @@ namespace TbhDpsMeter
         private Vector2 _dragOffset; private bool _dragging;
 
         private Texture2D _white, _bgTex;
-        private GUIStyle _title, _label, _dim, _tiny, _btn, _box, _col;
+        private GUIStyle _title, _label, _dim, _tiny, _btn, _box, _col, _wrap;
         private bool _stylesReady; private int _builtFs = -1, _builtFsm = -1;
         // this panel runs +2 over the global font sizes for readability (dense list + side column)
         private int Fs => Plugin.FontSize.Value + 2;
@@ -66,13 +67,17 @@ namespace TbhDpsMeter
         private readonly Dictionary<int, int[]> _orig = new Dictionary<int, int[]>();  // real equipped (anchor)
         private readonly Dictionary<int, int[]> _load = new Dictionary<int, int[]>();   // sandbox (editable)
         private readonly Dictionary<int, double> _measDps = new Dictionary<int, double>();
-        private readonly Dictionary<int, List<int[]>> _heroMats = new Dictionary<int, List<int[]>>();  // hero -> [matKey,tier]
+        // hero -> slot -> material key per socket (deco sockets first, then engraving, then inscription)
+        private readonly Dictionary<int, Dictionary<int, int[]>> _sockets = new Dictionary<int, Dictionary<int, int[]>>();
+        private int _focus = 0;          // gear slot whose sockets are shown in the bench
+        private int _sockSlot = -1, _sockPos = -1;  // socket being edited (side-column open when _sockSlot>=0)
+        private char _sockType = 'D';    // socket type being edited (D/E/I)
+        private readonly List<Rect> _sockRects = new List<Rect>();    // clickable socket cells (focused item)
+        private readonly List<int> _sockPosList = new List<int>();    // parallel: socket position per cell
+        private readonly List<Rect> _focusRects = new List<Rect>();   // clickable gear rows (set focus)
         private int _picker = -1;       // slot whose item list is open (-1 = main view)
-        private bool _matPicker;        // material-list picker open
         private int _pickerPage;
         private string _pickGrade = "";  // active grade-filter chip in the picker ("" = all)
-        private Rect _addMatRect;
-        private readonly List<Rect> _matRmRects = new List<Rect>();
         private readonly List<Rect> _gradeRects = new List<Rect>();   // grade-chip hitboxes
         private readonly List<string> _gradeKeys = new List<string>();
         // TBH's 10-tier rarity ladder (ascending) + short CJK labels, for the picker's grade chips.
@@ -165,18 +170,50 @@ namespace TbhDpsMeter
 
         private int CurHero => (_heroIdx >= 0 && _heroIdx < _heroes.Count) ? _heroes[_heroIdx] : 0;
 
-        private List<int> KeysOf(Dictionary<int, int[]> src, int hero)
+        private Dictionary<int, int[]> SockOf(int hero)
         {
-            var l = new List<int>();
-            if (src.TryGetValue(hero, out var arr)) foreach (var k in arr) if (k != 0) l.Add(k);
-            return l;
+            if (!_sockets.TryGetValue(hero, out var d)) { d = new Dictionary<int, int[]>(); _sockets[hero] = d; }
+            return d;
+        }
+        // [deco, engrave, inscribe] socket counts for the item currently in a slot (driven by its grade)
+        private int[] SlotSockets(int hero, int slot)
+        {
+            var g = (_load.TryGetValue(hero, out var a) && slot >= 0 && slot < a.Length) ? GearDatabase.ByKey(a[slot]) : null;
+            return g != null ? SocketDb.Counts(g.Grade) : new int[3];
+        }
+        private int GetSocket(int hero, int slot, int pos)
+        {
+            if (_sockets.TryGetValue(hero, out var d) && d.TryGetValue(slot, out var a) && a != null && pos >= 0 && pos < a.Length) return a[pos];
+            return 0;
+        }
+        private void SetSocket(int slot, int pos, int matKey)
+        {
+            int h = CurHero; if (h == 0) return;
+            var cc = SlotSockets(h, slot); int total = cc[0] + cc[1] + cc[2];
+            if (total <= 0) return;
+            var d = SockOf(h);
+            if (!d.TryGetValue(slot, out var a) || a == null || a.Length != total) { a = new int[total]; d[slot] = a; }
+            if (pos >= 0 && pos < a.Length) a[pos] = matKey;
+        }
+        // gear group (WEAPON/ARMOR/ACCESSORY) of the item in a slot — selects which socket effect applies
+        private string SlotGroup(int hero, int slot)
+        {
+            var g = (_load.TryGetValue(hero, out var a) && slot >= 0 && slot < a.Length) ? GearDatabase.ByKey(a[slot]) : null;
+            return g != null ? g.GearGroup : "";
+        }
+        // open the side-column material picker for a socket; its type (D/E/I) follows the position
+        private void OpenSockPicker(int slot, int pos)
+        {
+            var cc = SlotSockets(CurHero, slot);
+            _sockType = pos < cc[0] ? 'D' : (pos < cc[0] + cc[1] ? 'E' : 'I');
+            _sockSlot = slot; _sockPos = pos; _picker = -1; _pickerPage = 0;
         }
 
         private void HandlePointer()
         {
             if (GameUiState.MenuOpen()) { if (_dragging) { _dragging = false; InputCompat.ReleaseDrag(Slot); } return; }
             Vector2 m = UiScale.ToLocal(InputCompat.MouseGuiPos(), _rect.x, _rect.y, _scale);
-            if (!(_picker >= 0 || _matPicker))   // width is owned by the side-column when it's open; don't resize then
+            if (!(_picker >= 0 || _sockSlot >= 0))   // width is owned by the side-column when it's open; don't resize then
             {
                 float rw = _rect.width, dh = 0f;
                 var rr = _resize.Handle(Slot, m, ref rw, ref dh, 460f, Mathf.Max(460f, Screen.width * 0.95f), 0f, 0f, false);
@@ -199,22 +236,23 @@ namespace TbhDpsMeter
                     for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
                         if (_pickRects[i].Contains(m)) { SetSlot(_picker, _pickKeys[i]); return; }   // keep list open after a swap
                 }
-                if (_matPicker)
+                if (_sockSlot >= 0)
                 {
-                    if (_backRect.Contains(m)) { _matPicker = false; return; }
+                    if (_backRect.Contains(m)) { _sockSlot = -1; return; }
                     if (_ppPrev.Contains(m)) { _pickerPage = Mathf.Max(0, _pickerPage - 1); return; }
                     if (_ppNext.Contains(m)) { _pickerPage++; return; }
                     for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
-                        if (_pickRects[i].Contains(m)) { AddMat(_pickKeys[i]); _matPicker = false; return; }
+                        if (_pickRects[i].Contains(m)) { SetSocket(_sockSlot, _sockPos, _pickKeys[i]); _sockSlot = -1; return; }
                 }
                 if (_resetRect.Contains(m)) { ResetLoadout(); return; }
                 for (int i = 0; i < _tabRects.Count; i++)
                     if (_tabRects[i].Contains(m)) { _heroIdx = i; return; }   // keep the side-column open across heroes
                 for (int i = 0; i < _swapRects.Count; i++)
-                    if (_swapRects[i].Contains(m)) { _picker = i; _matPicker = false; _pickerPage = 0; _pickGrade = ""; return; }
-                if (_addMatRect.Contains(m)) { _matPicker = true; _picker = -1; _pickerPage = 0; return; }
-                for (int i = 0; i < _matRmRects.Count; i++)
-                    if (_matRmRects[i].Contains(m)) { RemoveMat(i); return; }
+                    if (_swapRects[i].Contains(m)) { _picker = i; _focus = i; _sockSlot = -1; _pickerPage = 0; _pickGrade = ""; return; }
+                for (int i = 0; i < _focusRects.Count; i++)
+                    if (_focusRects[i].Contains(m)) { _focus = i; _sockSlot = -1; return; }
+                for (int i = 0; i < _sockRects.Count && i < _sockPosList.Count; i++)
+                    if (_sockRects[i].Contains(m)) { OpenSockPicker(_focus, _sockPosList[i]); return; }
                 if (_rect.Contains(m) && InputCompat.ClaimDrag(Slot)) { _dragging = true; _dragOffset = m - new Vector2(_rect.x, _rect.y); }
             }
             if (_dragging)
@@ -229,32 +267,43 @@ namespace TbhDpsMeter
         {
             int h = CurHero; if (h == 0) return;
             if (!_load.TryGetValue(h, out var arr)) { arr = new int[SlotParts.Length]; _load[h] = arr; }
-            if (slot >= 0 && slot < arr.Length) arr[slot] = itemKey;
+            if (slot >= 0 && slot < arr.Length && arr[slot] != itemKey) { arr[slot] = itemKey; SockOf(h).Remove(slot); }
         }
         private void ResetLoadout()
         {
             int h = CurHero;
             if (_orig.TryGetValue(h, out var o)) { var c = new int[o.Length]; Array.Copy(o, c, o.Length); _load[h] = c; }
-            _heroMats.Remove(h);
+            _sockets.Remove(h);
         }
-        private void AddMat(int matKey)
+        // ---- stat-line formatting (localized name + signed value) ----
+        private static string StatL(string stat) => Loc.G(stat);   // StatType -> localized; falls back to the raw name
+        // percent-type stats are stored x10 (e.g. CriticalDamage 1089 = 108.9%); a short list is flat integers.
+        private static bool IsFlat(string stat, string mod)
         {
-            int h = CurHero; if (h == 0) return;
-            if (!_heroMats.TryGetValue(h, out var l)) { l = new List<int[]>(); _heroMats[h] = l; }
-            int maxT = 1; foreach (var t in GearDatabase.Material(matKey)) if (t.Tier > maxT) maxT = t.Tier;
-            l.Add(new int[] { matKey, maxT });
+            if (mod != "FLAT") return false;
+            switch (stat)
+            {
+                case "AttackDamage": case "MaxHp": case "Armor": case "AddHpPerHit": case "AddHpPerKill":
+                case "ProjectileCount": case "Multistrike": case "DamageAbsorption": case "HpRegenPerSec":
+                case "DamageAddition": case "PhysicalDamageAddition": case "FireDamageAddition":
+                case "ColdDamageAddition": case "LightningDamageAddition": case "ChaosDamageAddition":
+                case "AddAllSkillLevel": case "BaseAttackCountReduction": return true;
+                default: return false;
+            }
         }
-        private void RemoveMat(int idx)
+        private static string StatVal(string stat, string mod, double v)
         {
-            int h = CurHero;
-            if (_heroMats.TryGetValue(h, out var l) && idx >= 0 && idx < l.Count) l.RemoveAt(idx);
+            string sign = v >= 0 ? "+" : "";
+            return IsFlat(stat, mod) ? $"{sign}{v:0}" : $"{sign}{v / 10.0:0.#}%";
         }
-        private static string MatEffect(int[] mt)
+        // a socketed material's effect on a gear group, formatted ("空" when the socket is empty)
+        private static string SockEffect(int matKey, string gearGroup)
         {
-            if (mt == null || mt.Length < 2) return "";
-            foreach (var t in GearDatabase.Material(mt[0]))
-                if (t.Tier == mt[1]) return $"{t.Stat} {(t.Mod == "FLAT" ? "+" : (t.Mod == "ADDITIVE" ? "%+" : "×"))}{t.Mid:0} <size=9>T{mt[1]}</size>";
-            return "#" + mt[0];
+            if (matKey == 0) return $"<color=#67707d>{Loc.G("sock_empty")}</color>";
+            var mm = MatCatalog.Get(matKey);
+            if (mm == null || !mm.HasFor(gearGroup)) return Nm(matKey);
+            var e = mm.Effect(gearGroup);
+            return $"<color=#bcd0ea>{StatL(e.Stat)} {StatVal(e.Stat, e.Mod, e.Value)}</color> <size=9><color=#8a93a0>T{mm.TierFor(gearGroup)}</color></size>";
         }
 
         // ---------------- rendering ----------------
@@ -269,10 +318,11 @@ namespace TbhDpsMeter
             _label = new GUIStyle { fontSize = fs, richText = true }; _label.normal.textColor = new Color(0.93f, 0.93f, 0.93f);
             _dim = new GUIStyle { fontSize = fsm, richText = true }; _dim.normal.textColor = new Color(0.78f, 0.84f, 0.95f);
             _tiny = new GUIStyle { fontSize = Mathf.Max(9, fsm - 2), richText = true }; _tiny.normal.textColor = new Color(0.7f, 0.75f, 0.85f);
+            _wrap = new GUIStyle { fontSize = Mathf.Max(10, fsm - 1), richText = true, wordWrap = true }; _wrap.normal.textColor = new Color(0.72f, 0.77f, 0.86f);
             _col = new GUIStyle { fontSize = fs, richText = true, alignment = TextAnchor.MiddleRight }; _col.normal.textColor = Color.white;
             _btn = new GUIStyle(GUI.skin.button) { fontSize = fsm, fontStyle = FontStyle.Bold, richText = true };
             _box = new GUIStyle(); _box.normal.background = _bgTex;
-            OverlayFonts.Apply(_title, _label, _dim, _tiny, _col, _btn);
+            OverlayFonts.Apply(_title, _label, _dim, _tiny, _col, _btn, _wrap);
             _stylesReady = true;
         }
         private void DrawRect(float x, float y, float w, float h, Color c) { var p = GUI.color; GUI.color = c; GUI.DrawTexture(new Rect(x, y, w, h), _white); GUI.color = p; }
@@ -303,13 +353,16 @@ namespace TbhDpsMeter
                 EnsureAssets(); if (!_placed) PlaceDefault(); if (!_loaded) Reload();
                 int fs = Fs; float lh = fs + 6;
                 // main column + optional item/material side-column to the RIGHT (expand, don't replace the page)
-                bool sideOpen = _picker >= 0 || _matPicker;
+                bool sideOpen = _picker >= 0 || _sockSlot >= 0;
                 float baseW = Mathf.Max(560f, Plugin.FitPanelWidth.Value);
                 _rect.width = baseW + (sideOpen ? PickerW : 0f);
                 float x = _rect.x, ix = x + Pad, w = _rect.width, iw = baseW - Pad * 2;
 
-                int matN = (_heroMats.TryGetValue(CurHero, out var m0) && m0 != null) ? m0.Count : 0;
-                int mainRows = 3 + 1 + SlotParts.Length + 2 + matN;
+                // socket section height = focused item's header + one row per (non-empty type label + each socket)
+                int[] sc0 = SlotSockets(CurHero, _focus);
+                int typesShown = (sc0[0] > 0 ? 1 : 0) + (sc0[1] > 0 ? 1 : 0) + (sc0[2] > 0 ? 1 : 0);
+                int sockRows = Mathf.Max(2, 1 + typesShown + sc0[0] + sc0[1] + sc0[2]);
+                int mainRows = 3 + 1 + SlotParts.Length + 1 + sockRows;
                 int rows = sideOpen ? Mathf.Max(mainRows, 18) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
@@ -347,12 +400,13 @@ namespace TbhDpsMeter
                 }
                 cy += lh + 2;
 
-                // computed stats (sandbox) + anchored DPS
-                var sbKeys = KeysOf(_load, hero);
-                List<int[]> sbMats; _heroMats.TryGetValue(hero, out sbMats);
-                var agg = FitCalc.LoadoutStats(sbKeys, sbMats);
-                double sbDps = FitCalc.LoadoutDps(sbKeys, sbMats);
-                double origDps = FitCalc.LoadoutDps(KeysOf(_orig, hero));
+                // computed stats (sandbox gear + sockets) + anchored DPS
+                _load.TryGetValue(hero, out var gearArr);
+                _sockets.TryGetValue(hero, out var sockMap);
+                var agg = FitCalc.LoadoutStats(gearArr, sockMap);
+                double sbDps = FitCalc.LoadoutDps(gearArr, sockMap);
+                _orig.TryGetValue(hero, out var origArr);
+                double origDps = FitCalc.LoadoutDps(origArr, null);
                 double meas; _measDps.TryGetValue(hero, out meas);
                 double ratio = origDps > 0 ? sbDps / origDps : 1.0;
                 double shownDps = meas > 0 ? meas * ratio : sbDps;
@@ -370,14 +424,16 @@ namespace TbhDpsMeter
                     $"<color={rc}>(×{ratio:0.000} {Loc.G("fit_vs")})</color>   <size=10><color=#8a93a0>{Loc.G("fit_approx")}</color></size>", _label); cy += lh;
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
-                // gear slots
-                _swapRects.Clear();
+                // gear slots (click a row to view its sockets below; 換 swaps the item)
+                _swapRects.Clear(); _focusRects.Clear();
                 _load.TryGetValue(hero, out var arr);
                 for (int s = 0; s < SlotParts.Length; s++)
                 {
                     int key = (arr != null && s < arr.Length) ? arr[s] : 0;
                     bool changed = _orig.TryGetValue(hero, out var oa) && oa != null && s < oa.Length && oa[s] != key;
-                    if ((s & 1) == 1) DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
+                    if (_focus == s) DrawRect(ix, cy, iw, lh, new Color(0.85f, 0.70f, 0.30f, 0.14f));
+                    else if ((s & 1) == 1) DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
+                    _focusRects.Add(new Rect(ix, cy, iw - 56, lh));
                     GUI.Label(new Rect(ix, cy, 44, lh), $"<color=#9aa3b0>{SlotL(s)}</color>", _label);
                     var stex = GearIconCache.Get(key);
                     if (stex != null) GUI.DrawTexture(new Rect(ix + 46, cy + 1, lh - 2, lh - 2), stex, ScaleMode.ScaleToFit);
@@ -392,28 +448,45 @@ namespace TbhDpsMeter
                     cy += lh;
                 }
 
-                // runes / materials (sandbox additions; their stats fold into the aggregation above)
+                // ---- sockets of the focused item (裝飾槽 / 雕刻槽 / 銘文槽); their effects fold into the stats above ----
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
-                GUI.Label(new Rect(ix, cy, iw - 70, lh), $"<color=#9fb4cc>{Loc.G("fit_runes")}</color>", _dim);
-                _addMatRect = new Rect(ix + iw - 64, cy, 62, lh - 2); GUI.Button(_addMatRect, Loc.G("fit_addmat"), _btn);
-                cy += lh;
-                _matRmRects.Clear();
-                if (sbMats != null)
-                    for (int i = 0; i < sbMats.Count; i++)
+                int fkey = (arr != null && _focus < arr.Length) ? arr[_focus] : 0;
+                string fgg = SlotGroup(hero, _focus);
+                int[] cc = SlotSockets(hero, _focus);
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_sockets")}</color>  <color=#cdd5df>{SlotL(_focus)} · {Nm(fkey)}</color>", _dim); cy += lh;
+                _sockRects.Clear(); _sockPosList.Clear();
+                if (cc[0] + cc[1] + cc[2] == 0)
+                {
+                    GUI.Label(new Rect(ix + 12, cy, iw - 12, lh), $"<size=11><color=#67707d>{Loc.G("sock_none")}</color></size>", _label); cy += lh;
+                }
+                else
+                {
+                    string[] tk = { "sock_deco", "sock_engrave", "sock_inscribe" };
+                    int pos = 0;
+                    for (int ti = 0; ti < 3; ti++)
                     {
-                        GUI.Label(new Rect(ix + 12, cy, iw - 12 - 28, lh), $"<size=11><color=#bcd0ea>◆ {MatEffect(sbMats[i])}</color></size>", _label);
-                        var rm = new Rect(ix + iw - 26, cy + 1, 24, lh - 3); GUI.Button(rm, "×", _btn); _matRmRects.Add(rm);
-                        cy += lh;
+                        if (cc[ti] == 0) continue;
+                        GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9aa3b0>{Loc.G(tk[ti])} ×{cc[ti]}</color>", _dim); cy += lh;
+                        for (int j = 0; j < cc[ti]; j++)
+                        {
+                            int mk = GetSocket(hero, _focus, pos);
+                            var cell = new Rect(ix + 12, cy, iw - 12, lh - 1);
+                            DrawRect(cell.x, cell.y, cell.width, cell.height, mk != 0 ? new Color(0.25f, 0.42f, 0.40f, 0.22f) : new Color(1, 1, 1, 0.04f));
+                            GUI.Label(new Rect(ix + 18, cy, iw - 24, lh), $"<size=11>◇ {SockEffect(mk, fgg)}</size>", _label);
+                            _sockRects.Add(cell); _sockPosList.Add(pos);
+                            pos++; cy += lh;
+                        }
                     }
+                }
 
-                // side column: the item / material list expands to the RIGHT of the bench
+                // side column: the item / socket-material list expands to the RIGHT of the bench
                 if (sideOpen)
                 {
                     float divX = x + baseW;
                     DrawRect(divX, _rect.y + Pad, 1, _rect.height - Pad * 2, new Color(1, 1, 1, 0.14f));
                     float pix = divX + 8, piw = PickerW - 16, pcy = _rect.y + Pad + lh;
                     if (_picker >= 0) DrawPicker(pix, pcy, piw, lh, hero);
-                    else DrawMatPicker(pix, pcy, piw, lh, hero);
+                    else DrawSockPicker(pix, pcy, piw, lh, fgg);
                 }
                 _resize.DrawGrip(_white, _rect);
             }
@@ -464,7 +537,7 @@ namespace TbhDpsMeter
                 foreach (var g in list) if (g.Grade == _pickGrade) fg.Add(g);
                 list = fg;
             }
-            int per = 7; float rowH = lh * 1.7f;
+            int per = 5; float rowH = lh * 2.6f;
             int pages = Mathf.Max(1, (list.Count + per - 1) / per);
             _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
             int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
@@ -488,9 +561,9 @@ namespace TbhDpsMeter
                 string own = g.Key == ownedKey ? "<color=#7fffa0>✓</color> " : "";
                 string lvl = g.Level > 0 ? $" <size=10><color=#8a93a0>Lv{g.Level}</color></size>" : "";
                 GUI.Label(new Rect(tx, cy + 1, iw - rowH - 6, lh), $"{own}<color=#{GradeHex(g.Grade)}><b>{Nm(g.Key)}</b></color>{lvl}", _label);
-                string stats = ""; int sc = 0;
-                foreach (var st in g.Stats) { if (sc++ >= 4) { stats += "…"; break; } stats += $"{st.Stat.Substring(0, Math.Min(4, st.Stat.Length))}{(st.Mod == "FLAT" ? "+" : (st.Mod == "ADDITIVE" ? "%+" : "×"))}{st.Value:0}　"; }
-                GUI.Label(new Rect(tx, cy + lh - 1, iw - rowH - 6, lh), $"<color=#8a93a0>{stats}</color>", _tiny);
+                string stats = "";
+                foreach (var st in g.Stats) stats += $"{StatL(st.Stat)} {StatVal(st.Stat, st.Mod, st.Value)}　";
+                GUI.Label(new Rect(tx, cy + lh - 2, iw - rowH - 4, rowH - lh), $"<color=#9aa3b0>{stats}</color>", _wrap);
                 _pickRects.Add(r); _pickKeys.Add(g.Key); cy += rowH;
             }
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
@@ -498,28 +571,39 @@ namespace TbhDpsMeter
             GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<color=#9fb4cc>{_pickerPage + 1}/{pages}　{list.Count} {Loc.G("fit_count")}</color>", _dim);
         }
 
-        private void DrawMatPicker(float ix, float cy, float iw, float lh, int hero)
+        private void DrawSockPicker(float ix, float cy, float iw, float lh, string gearGroup)
         {
+            string tk = _sockType == 'D' ? "sock_deco" : (_sockType == 'E' ? "sock_engrave" : "sock_inscribe");
             _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ " + Loc.G("fit_back"), _btn);
-            GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{Loc.G("fit_pickmat")}</color>", _label);
+            GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{Loc.G(tk)} — {Loc.G("fit_pickmat")}</color>", _label);
             cy += lh;
-            var keys = GearDatabase.MaterialKeys;
-            int per = 12; int pages = Mathf.Max(1, (keys.Count + per - 1) / per);
+            // only materials that actually grant something on this gear group
+            var all = MatCatalog.ByType(_sockType);
+            var list = new List<SockMat>();
+            foreach (var mm in all) if (mm.HasFor(gearGroup)) list.Add(mm);
+            int per = 7; float rowH = lh * 1.5f;
+            int pages = Mathf.Max(1, (list.Count + per - 1) / per);
             _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
-            int start = _pickerPage * per; int shown = Mathf.Min(per, keys.Count - start);
+            int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
             _pickRects.Clear(); _pickKeys.Clear();
+            // page 0 leads with an "empty / remove" option
+            if (_pickerPage == 0)
+            {
+                var er = new Rect(ix, cy, iw, lh - 1); DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
+                GUI.Label(new Rect(ix + 6, cy, iw - 8, lh), $"<color=#67707d>✕ {Loc.G("sock_empty")}</color>", _label);
+                _pickRects.Add(er); _pickKeys.Add(0); cy += lh;
+            }
             for (int i = 0; i < shown; i++)
             {
-                int mk = keys[start + i];
-                MatTier top = default; foreach (var t in GearDatabase.Material(mk)) if (t.Tier >= top.Tier) top = t;
-                var r = new Rect(ix, cy, iw, lh - 1); if ((i & 1) == 1) DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
-                string sym = top.Mod == "FLAT" ? "+" : (top.Mod == "ADDITIVE" ? "%+" : "×");
-                GUI.Label(new Rect(ix + 4, cy, iw - 8, lh), $"<size=11><color=#eaf3ee>{top.Stat}</color> <color=#8a93a0>{sym}{top.Min:0}~{top.Max:0} (max T{top.Tier})</color></size>", _label);
-                _pickRects.Add(r); _pickKeys.Add(mk); cy += lh;
+                var mm = list[start + i]; var e = mm.Effect(gearGroup);
+                var r = new Rect(ix, cy, iw, rowH - 1); if ((i & 1) == 1) DrawRect(ix, cy, iw, rowH, new Color(1, 1, 1, 0.03f));
+                GUI.Label(new Rect(ix + 6, cy, iw - 10, lh), $"<color=#eaf3ee>{StatL(e.Stat)} {StatVal(e.Stat, e.Mod, e.Value)}</color> <size=9><color=#8a93a0>T{mm.TierFor(gearGroup)}</color></size>", _label);
+                GUI.Label(new Rect(ix + 12, cy + lh - 3, iw - 16, lh), $"<size=10><color=#7c8696>{Nm(mm.Key)}</color></size>", _tiny);
+                _pickRects.Add(r); _pickKeys.Add(mm.Key); cy += rowH;
             }
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
             GUI.Button(_ppPrev, "◀", _btn); GUI.Button(_ppNext, "▶", _btn);
-            GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<color=#9fb4cc>{_pickerPage + 1}/{pages}　{keys.Count} {Loc.G("fit_count")}</color>", _dim);
+            GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<color=#9fb4cc>{_pickerPage + 1}/{pages}　{list.Count} {Loc.G("fit_count")}</color>", _dim);
         }
     }
 }

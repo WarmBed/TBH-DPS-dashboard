@@ -752,8 +752,8 @@ class Tests
     {
         Console.WriteLine("\n-- FitEngine --");
         GearDatabase.Reset();
-        string gj = "[{\"k\":301041,\"t\":\"BOW\",\"g\":\"RARE\",\"l\":20,\"p\":\"MAIN_WEAPON\",\"n\":\"bow1\",\"s\":[[\"AttackDamage\",\"FLAT\",7],[\"AttackSpeed\",\"FLAT\",20],[\"AttackDamage\",\"ADDITIVE\",221]]}," +
-            "{\"k\":401001,\"t\":\"RING\",\"g\":\"COMMON\",\"l\":1,\"p\":\"RING\",\"n\":\"ring1\",\"s\":[[\"CriticalChance\",\"FLAT\",5]]}]";
+        string gj = "[{\"k\":301041,\"t\":\"BOW\",\"g\":\"RARE\",\"gg\":\"WEAPON\",\"l\":20,\"p\":\"MAIN_WEAPON\",\"n\":\"bow1\",\"s\":[[\"AttackDamage\",\"FLAT\",7],[\"AttackSpeed\",\"FLAT\",20],[\"AttackDamage\",\"ADDITIVE\",221]]}," +
+            "{\"k\":401001,\"t\":\"RING\",\"g\":\"COMMON\",\"gg\":\"ACCESSORY\",\"l\":1,\"p\":\"RING\",\"n\":\"ring1\",\"s\":[[\"CriticalChance\",\"FLAT\",5]]}]";
         GearDatabase.LoadGear(gj);
         Check("[fit] gear count 2", GearDatabase.Count == 2, GearDatabase.Count);
         var bow = GearDatabase.ByKey(301041);
@@ -762,11 +762,20 @@ class Tests
         Check("[fit] bySlot MAIN_WEAPON=1", GearDatabase.BySlot("MAIN_WEAPON").Count == 1, GearDatabase.BySlot("MAIN_WEAPON").Count);
         Check("[fit] bySlot RING=1", GearDatabase.BySlot("RING").Count == 1, GearDatabase.BySlot("RING").Count);
 
-        string mj = "{\"100101\":[[1,\"AttackDamage\",\"FLAT\",1,2],[3,\"AttackDamage\",\"FLAT\",3,6]]}";
-        GearDatabase.LoadMats(mj);
-        var mat = GearDatabase.Material(100101);
-        Check("[fit] material 2 tiers", mat.Count == 2, mat.Count);
-        Check("[fit] material tier3 mid 4.5", mat.Count > 1 && Near(mat[1].Mid, 4.5), mat.Count > 1 ? mat[1].Mid : -1);
+        // material catalog: matKey -> type + per-gear-group effect
+        string mj = "{\"110001\":{\"t\":\"D\",\"n\":\"mat1\",\"w\":[\"AttackDamage\",\"FLAT\",10,2],\"a\":[\"Armor\",\"FLAT\",5,1]}}";
+        MatCatalog.Load(mj);
+        var sm = MatCatalog.Get(110001);
+        Check("[fit] mat type D", sm != null && sm.Type == 'D', sm != null ? sm.Type.ToString() : "null");
+        Check("[fit] mat weapon effect AttackDamage+10", sm != null && sm.HasW && sm.W.Stat == "AttackDamage" && Near(sm.W.Value, 10), sm != null && sm.HasW ? sm.W.Value : -1);
+        Check("[fit] mat weapon tier 2", sm != null && sm.WTier == 2, sm != null ? sm.WTier : -1);
+        Check("[fit] mat no accessory effect", sm != null && !sm.HasFor("ACCESSORY"), sm != null ? sm.HasFor("ACCESSORY") : true);
+        Check("[fit] catalog byType D = 1", MatCatalog.ByType('D').Count == 1, MatCatalog.ByType('D').Count);
+
+        // socket counts per grade
+        SocketDb.Load("{\"BEYOND\":[2,2,1],\"COMMON\":[0,0,0]}");
+        var bc = SocketDb.Counts("BEYOND");
+        Check("[fit] BEYOND sockets 2/2/1", bc[0] == 2 && bc[1] == 2 && bc[2] == 1, string.Join(",", bc));
 
         // aggregation: AttackDamage FLAT 7 × (1 + 221/100) = 22.47 ; AttackSpeed FLAT 20
         var agg = StatAggregator.Aggregate(bow.Stats);
@@ -774,6 +783,12 @@ class Tests
         Check("[fit] agg AttackSpeed = 20", Near(agg["AttackSpeed"], 20), agg.ContainsKey("AttackSpeed") ? agg["AttackSpeed"] : -1);
         var agg2 = StatAggregator.Aggregate(new System.Collections.Generic.List<GearStat> { new GearStat("AttackDamage", "FLAT", 10), new GearStat("AttackDamage", "MULTIPLICATIVE", 50) });
         Check("[fit] agg mult 10×1.5 = 15", Near(agg2["AttackDamage"], 15), agg2.ContainsKey("AttackDamage") ? agg2["AttackDamage"] : -1);
+
+        // socket folds into loadout stats: bow (slot 0) + weapon-deco AttackDamage+10 → (7+10)×3.21
+        var gear = new int[] { 301041, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        var socks = new System.Collections.Generic.Dictionary<int, int[]> { { 0, new int[] { 110001 } } };
+        var aggS = FitCalc.LoadoutStats(gear, socks);
+        Check("[fit] socket effect folds in (17×3.21=54.57)", aggS.ContainsKey("AttackDamage") && Near(aggS["AttackDamage"], 54.57, 0.01), aggS.ContainsKey("AttackDamage") ? aggS["AttackDamage"] : -1);
     }
 
     // ================= RunRetention (per-stage history) =================
