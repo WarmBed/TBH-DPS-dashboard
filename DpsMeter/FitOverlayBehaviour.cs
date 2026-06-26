@@ -42,10 +42,11 @@ namespace TbhDpsMeter
 
         private const int Slot = 12;
         private const float Pad = 10f;
-        private const float PickerW = 300f;   // width of the item/material side-column (expand-right)
+        private const float PickerW = 340f;   // width of the item/material side-column (expand-right)
         // gear slot index -> (PARTS key in the DB, short label)
         private static readonly string[] SlotParts = { "MAIN_WEAPON", "SUB_WEAPON", "HELMET", "ARMOR", "GLOVES", "BOOTS", "AMULET", "EARING", "RING", "BRACER" };
-        private static readonly string[] SlotLabel = { "主武", "副武", "頭盔", "鎧甲", "手套", "靴", "護符", "耳環", "戒指", "護腕" };
+        private static readonly string[] SlotKey = { "slot_main", "slot_off", "slot_helm", "slot_body", "slot_glove", "slot_boot", "slot_amulet", "slot_ear", "slot_ring", "slot_bracer" };
+        private static string SlotL(int s) => Loc.G(SlotKey[s]);
 
         private Rect _rect = new Rect(90, 90, 560, 0);
         private bool _visible, _placed;
@@ -55,6 +56,9 @@ namespace TbhDpsMeter
         private Texture2D _white, _bgTex;
         private GUIStyle _title, _label, _dim, _tiny, _btn, _box, _col;
         private bool _stylesReady; private int _builtFs = -1, _builtFsm = -1;
+        // this panel runs +2 over the global font sizes for readability (dense list + side column)
+        private int Fs => Plugin.FontSize.Value + 2;
+        private int Fsm => Plugin.FontSizeSmall.Value + 2;
 
         private int _seenVersion = -1; private bool _loaded;
         private readonly List<int> _heroes = new List<int>();
@@ -73,7 +77,7 @@ namespace TbhDpsMeter
         private readonly List<string> _gradeKeys = new List<string>();
         // TBH's 10-tier rarity ladder (ascending) + short CJK labels, for the picker's grade chips.
         private static readonly string[] GradeLadder = { "COMMON", "UNCOMMON", "RARE", "LEGENDARY", "IMMORTAL", "ARCANA", "BEYOND", "CELESTIAL", "DIVINE", "COSMIC" };
-        private static readonly string[] GradeLabel = { "普通", "罕見", "稀有", "傳奇", "不朽", "至寶", "超凡", "天界", "神聖", "宇宙" };
+        private static string GradeL(string g) => Loc.G("grade_" + g.ToLowerInvariant());
 
         private Rect _closeRect, _resetRect, _backRect;
         private readonly List<Rect> _tabRects = new List<Rect>();
@@ -258,7 +262,7 @@ namespace TbhDpsMeter
         {
             if (_white == null) { _white = new Texture2D(1, 1); _white.SetPixel(0, 0, Color.white); _white.Apply(); }
             if (_bgTex == null) { _bgTex = new Texture2D(1, 1); _bgTex.SetPixel(0, 0, new Color(0, 0, 0, 1f)); _bgTex.Apply(); if (_box != null) _box.normal.background = _bgTex; }
-            int fs = Plugin.FontSize.Value, fsm = Plugin.FontSizeSmall.Value;
+            int fs = Fs, fsm = Fsm;
             if (_stylesReady && _builtFs == fs && _builtFsm == fsm) return;
             _builtFs = fs; _builtFsm = fsm;
             _title = new GUIStyle { fontSize = fs, fontStyle = FontStyle.Bold, richText = true }; _title.normal.textColor = new Color(1f, 0.86f, 0.35f);
@@ -297,7 +301,7 @@ namespace TbhDpsMeter
             try
             {
                 EnsureAssets(); if (!_placed) PlaceDefault(); if (!_loaded) Reload();
-                int fs = Plugin.FontSize.Value; float lh = fs + 6;
+                int fs = Fs; float lh = fs + 6;
                 // main column + optional item/material side-column to the RIGHT (expand, don't replace the page)
                 bool sideOpen = _picker >= 0 || _matPicker;
                 float baseW = Mathf.Max(560f, Plugin.FitPanelWidth.Value);
@@ -317,7 +321,7 @@ namespace TbhDpsMeter
                 float cy = _rect.y + Pad;
 
                 // title + reset + close
-                GUI.Label(new Rect(ix, cy, iw - 90, lh), $"{Loc.G("fit_title")} <size=10><color=#8a93a0>{GearDatabase.Count} items</color></size>", _title);
+                GUI.Label(new Rect(ix, cy, iw - 90, lh), $"{Loc.G("fit_title")} <size=10><color=#8a93a0>{GearDatabase.Count} {Loc.G("fit_count")}</color></size>", _title);
                 _resetRect = new Rect(x + baseW - 28 - 56, cy - 1, 56, lh); GUI.Button(_resetRect, Loc.G("sim_reset"), _btn);
                 _closeRect = new Rect(x + baseW - 26, cy - 2, 22, lh); GUI.Button(_closeRect, "✕", _btn);
                 cy += lh;
@@ -353,17 +357,17 @@ namespace TbhDpsMeter
                 double ratio = origDps > 0 ? sbDps / origDps : 1.0;
                 double shownDps = meas > 0 ? meas * ratio : sbDps;
 
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>攻擊</color> <color=#eaf3ee>{Sv(agg, "AttackDamage"):0}</color>   " +
-                    $"<color=#9fb4cc>攻速</color> <color=#eaf3ee>{Sv(agg, "AttackSpeed"):0.##}</color>   " +
-                    $"<color=#9fb4cc>暴擊</color> <color=#eaf3ee>{Sv(agg, "CriticalChance"):0.#}</color>   " +
-                    $"<color=#9fb4cc>暴傷</color> <color=#eaf3ee>{Sv(agg, "CriticalDamage"):0.#}</color>", _dim); cy += lh;
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>範圍</color> <color=#eaf3ee>{Sv(agg, "AoE"):0}</color>   " +
-                    $"<color=#9fb4cc>冷卻</color> <color=#eaf3ee>{Sv(agg, "CooldownReduction"):0}</color>   " +
-                    $"<color=#9fb4cc>多重</color> <color=#eaf3ee>{Sv(agg, "Multistrike"):0}</color>   " +
-                    $"<color=#9fb4cc>投射</color> <color=#eaf3ee>{Sv(agg, "ProjCount"):0}</color>", _dim); cy += lh;
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("attack")}</color> <color=#eaf3ee>{Sv(agg, "AttackDamage"):0}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("aspd")}</color> <color=#eaf3ee>{Sv(agg, "AttackSpeed"):0.##}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("critrate")}</color> <color=#eaf3ee>{Sv(agg, "CriticalChance"):0.#}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("critdmg")}</color> <color=#eaf3ee>{Sv(agg, "CriticalDamage"):0.#}</color>", _dim); cy += lh;
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("AoE")}</color> <color=#eaf3ee>{Sv(agg, "AoE"):0}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("cdr")}</color> <color=#eaf3ee>{Sv(agg, "CooldownReduction"):0}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("Multistrike")}</color> <color=#eaf3ee>{Sv(agg, "Multistrike"):0}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("ProjCount")}</color> <color=#eaf3ee>{Sv(agg, "ProjCount"):0}</color>", _dim); cy += lh;
                 string rc = ratio > 1.001 ? "#7fffa0" : (ratio < 0.999 ? "#ff8a8a" : "#cdd5df");
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>預測 DPS</color> <color=#eaf3ee><b>{FmtNum(shownDps)}</b></color>  " +
-                    $"<color={rc}>(×{ratio:0.000} vs 現況)</color>   <size=10><color=#8a93a0>公式佔位版,相對準</color></size>", _label); cy += lh;
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_dps")}</color> <color=#eaf3ee><b>{FmtNum(shownDps)}</b></color>  " +
+                    $"<color={rc}>(×{ratio:0.000} {Loc.G("fit_vs")})</color>   <size=10><color=#8a93a0>{Loc.G("fit_approx")}</color></size>", _label); cy += lh;
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
                 // gear slots
@@ -374,7 +378,7 @@ namespace TbhDpsMeter
                     int key = (arr != null && s < arr.Length) ? arr[s] : 0;
                     bool changed = _orig.TryGetValue(hero, out var oa) && oa != null && s < oa.Length && oa[s] != key;
                     if ((s & 1) == 1) DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
-                    GUI.Label(new Rect(ix, cy, 44, lh), $"<color=#9aa3b0>{SlotLabel[s]}</color>", _label);
+                    GUI.Label(new Rect(ix, cy, 44, lh), $"<color=#9aa3b0>{SlotL(s)}</color>", _label);
                     var stex = GearIconCache.Get(key);
                     if (stex != null) GUI.DrawTexture(new Rect(ix + 46, cy + 1, lh - 2, lh - 2), stex, ScaleMode.ScaleToFit);
                     var gt = GearDatabase.ByKey(key);
@@ -419,8 +423,8 @@ namespace TbhDpsMeter
 
         private void DrawPicker(float ix, float cy, float iw, float lh, int hero)
         {
-            _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ 返回", _btn);
-            GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{SlotLabel[_picker]} — 選擇裝備</color>", _label);
+            _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ " + Loc.G("fit_back"), _btn);
+            GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{SlotL(_picker)} — {Loc.G("fit_pickgear")}</color>", _label);
             cy += lh;
             var list = GearDatabase.BySlot(SlotParts[_picker]);
             // weapon slots hold many gear TYPES (sword/bow/staff…); a class can only use its own type,
@@ -440,9 +444,9 @@ namespace TbhDpsMeter
             var present = new HashSet<string>();
             foreach (var g in list) present.Add(g.Grade);
             _gradeRects.Clear(); _gradeKeys.Clear();
-            float chx = ix, chy = cy, chh = lh - 1, cw = 44, gap = 3;
+            float chx = ix, chy = cy, chh = lh - 1, cw = 50, gap = 3;
             DrawRect(chx, chy, cw, chh, _pickGrade == "" ? new Color(0.30f, 0.45f, 0.75f, 0.50f) : new Color(1, 1, 1, 0.06f));
-            GUI.Label(new Rect(chx + 6, chy, cw, chh), "<size=11>全部</size>", _label);
+            GUI.Label(new Rect(chx + 6, chy, cw, chh), Loc.G("fit_all"), _dim);
             _gradeRects.Add(new Rect(chx, chy, cw, chh)); _gradeKeys.Add(""); chx += cw + gap;
             for (int gi = 0; gi < GradeLadder.Length; gi++)
             {
@@ -450,7 +454,7 @@ namespace TbhDpsMeter
                 if (chx + cw > ix + iw) { chx = ix; chy += chh + 2; }
                 bool act = _pickGrade == GradeLadder[gi];
                 DrawRect(chx, chy, cw, chh, act ? new Color(0.30f, 0.45f, 0.75f, 0.50f) : new Color(1, 1, 1, 0.06f));
-                GUI.Label(new Rect(chx + 6, chy, cw, chh), $"<size=11><color=#{GradeHex(GradeLadder[gi])}>{GradeLabel[gi]}</color></size>", _label);
+                GUI.Label(new Rect(chx + 6, chy, cw, chh), $"<color=#{GradeHex(GradeLadder[gi])}>{GradeL(GradeLadder[gi])}</color>", _dim);
                 _gradeRects.Add(new Rect(chx, chy, cw, chh)); _gradeKeys.Add(GradeLadder[gi]); chx += cw + gap;
             }
             cy = chy + chh + 3;
@@ -484,20 +488,20 @@ namespace TbhDpsMeter
                 string own = g.Key == ownedKey ? "<color=#7fffa0>✓</color> " : "";
                 string lvl = g.Level > 0 ? $" <size=10><color=#8a93a0>Lv{g.Level}</color></size>" : "";
                 GUI.Label(new Rect(tx, cy + 1, iw - rowH - 6, lh), $"{own}<color=#{GradeHex(g.Grade)}><b>{Nm(g.Key)}</b></color>{lvl}", _label);
-                string stats = "";
-                foreach (var st in g.Stats) stats += $"{st.Stat.Substring(0, Math.Min(4, st.Stat.Length))}{(st.Mod == "FLAT" ? "+" : (st.Mod == "ADDITIVE" ? "%+" : "×"))}{st.Value:0}　";
-                GUI.Label(new Rect(tx, cy + lh - 1, iw - rowH - 6, lh), $"<size=10><color=#8a93a0>{stats}</color></size>", _tiny);
+                string stats = ""; int sc = 0;
+                foreach (var st in g.Stats) { if (sc++ >= 4) { stats += "…"; break; } stats += $"{st.Stat.Substring(0, Math.Min(4, st.Stat.Length))}{(st.Mod == "FLAT" ? "+" : (st.Mod == "ADDITIVE" ? "%+" : "×"))}{st.Value:0}　"; }
+                GUI.Label(new Rect(tx, cy + lh - 1, iw - rowH - 6, lh), $"<color=#8a93a0>{stats}</color>", _tiny);
                 _pickRects.Add(r); _pickKeys.Add(g.Key); cy += rowH;
             }
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
             GUI.Button(_ppPrev, "◀", _btn); GUI.Button(_ppNext, "▶", _btn);
-            GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<size=11><color=#9fb4cc>{_pickerPage + 1}/{pages}　{list.Count} 件</color></size>", _dim);
+            GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<color=#9fb4cc>{_pickerPage + 1}/{pages}　{list.Count} {Loc.G("fit_count")}</color>", _dim);
         }
 
         private void DrawMatPicker(float ix, float cy, float iw, float lh, int hero)
         {
-            _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ 返回", _btn);
-            GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{Loc.G("fit_runes")} — 選材料</color>", _label);
+            _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ " + Loc.G("fit_back"), _btn);
+            GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{Loc.G("fit_pickmat")}</color>", _label);
             cy += lh;
             var keys = GearDatabase.MaterialKeys;
             int per = 12; int pages = Mathf.Max(1, (keys.Count + per - 1) / per);
@@ -515,7 +519,7 @@ namespace TbhDpsMeter
             }
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
             GUI.Button(_ppPrev, "◀", _btn); GUI.Button(_ppNext, "▶", _btn);
-            GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<size=11><color=#9fb4cc>{_pickerPage + 1}/{pages}　{keys.Count} 材料</color></size>", _dim);
+            GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<color=#9fb4cc>{_pickerPage + 1}/{pages}　{keys.Count} {Loc.G("fit_count")}</color>", _dim);
         }
     }
 }
