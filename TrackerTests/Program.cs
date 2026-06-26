@@ -140,6 +140,7 @@ class Tests
         FarmDivisorTests();
         ClearTimeSimTests();
         DamageFormulaTests();
+        FitEngineTests();
         RunRetentionTests();
         WavDecoderTests();
 
@@ -744,6 +745,35 @@ class Tests
         // placeholder ExpectedDps folds crit in: attack × aspd × critMult (real formula replaces this body)
         var cs = new CombatStats { AttackDamage = 1000, AttackSpeed = 2, CritChance = 0, CritDamage = 3 };
         Check("[dmg] placeholder dps = atk×aspd (no crit) = 2000", Near(DamageFormula.ExpectedDps(cs), 2000), DamageFormula.ExpectedDps(cs));
+    }
+
+    // ================= FitEngine (gear DB + stat aggregation) =================
+    static void FitEngineTests()
+    {
+        Console.WriteLine("\n-- FitEngine --");
+        GearDatabase.Reset();
+        string gj = "[{\"k\":301041,\"t\":\"BOW\",\"g\":\"RARE\",\"l\":20,\"p\":\"MAIN_WEAPON\",\"n\":\"bow1\",\"s\":[[\"AttackDamage\",\"FLAT\",7],[\"AttackSpeed\",\"FLAT\",20],[\"AttackDamage\",\"ADDITIVE\",221]]}," +
+            "{\"k\":401001,\"t\":\"RING\",\"g\":\"COMMON\",\"l\":1,\"p\":\"RING\",\"n\":\"ring1\",\"s\":[[\"CriticalChance\",\"FLAT\",5]]}]";
+        GearDatabase.LoadGear(gj);
+        Check("[fit] gear count 2", GearDatabase.Count == 2, GearDatabase.Count);
+        var bow = GearDatabase.ByKey(301041);
+        Check("[fit] bow type/slot", bow != null && bow.Type == "BOW" && bow.Slot == "MAIN_WEAPON", bow != null ? bow.Type : "null");
+        Check("[fit] bow 3 stats", bow != null && bow.Stats.Count == 3, bow != null ? bow.Stats.Count : -1);
+        Check("[fit] bySlot MAIN_WEAPON=1", GearDatabase.BySlot("MAIN_WEAPON").Count == 1, GearDatabase.BySlot("MAIN_WEAPON").Count);
+        Check("[fit] bySlot RING=1", GearDatabase.BySlot("RING").Count == 1, GearDatabase.BySlot("RING").Count);
+
+        string mj = "{\"100101\":[[1,\"AttackDamage\",\"FLAT\",1,2],[3,\"AttackDamage\",\"FLAT\",3,6]]}";
+        GearDatabase.LoadMats(mj);
+        var mat = GearDatabase.Material(100101);
+        Check("[fit] material 2 tiers", mat.Count == 2, mat.Count);
+        Check("[fit] material tier3 mid 4.5", mat.Count > 1 && Near(mat[1].Mid, 4.5), mat.Count > 1 ? mat[1].Mid : -1);
+
+        // aggregation: AttackDamage FLAT 7 × (1 + 221/100) = 22.47 ; AttackSpeed FLAT 20
+        var agg = StatAggregator.Aggregate(bow.Stats);
+        Check("[fit] agg AttackDamage = 7×3.21 = 22.47", Near(agg["AttackDamage"], 22.47, 0.01), agg.ContainsKey("AttackDamage") ? agg["AttackDamage"] : -1);
+        Check("[fit] agg AttackSpeed = 20", Near(agg["AttackSpeed"], 20), agg.ContainsKey("AttackSpeed") ? agg["AttackSpeed"] : -1);
+        var agg2 = StatAggregator.Aggregate(new System.Collections.Generic.List<GearStat> { new GearStat("AttackDamage", "FLAT", 10), new GearStat("AttackDamage", "MULTIPLICATIVE", 50) });
+        Check("[fit] agg mult 10×1.5 = 15", Near(agg2["AttackDamage"], 15), agg2.ContainsKey("AttackDamage") ? agg2["AttackDamage"] : -1);
     }
 
     // ================= RunRetention (per-stage history) =================
