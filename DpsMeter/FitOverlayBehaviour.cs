@@ -42,6 +42,7 @@ namespace TbhDpsMeter
 
         private const int Slot = 12;
         private const float Pad = 10f;
+        private const float PickerW = 300f;   // width of the item/material side-column (expand-right)
         // gear slot index -> (PARTS key in the DB, short label)
         private static readonly string[] SlotParts = { "MAIN_WEAPON", "SUB_WEAPON", "HELMET", "ARMOR", "GLOVES", "BOOTS", "AMULET", "EARING", "RING", "BRACER" };
         private static readonly string[] SlotLabel = { "主武", "副武", "頭盔", "鎧甲", "手套", "靴", "護符", "耳環", "戒指", "護腕" };
@@ -171,15 +172,19 @@ namespace TbhDpsMeter
         {
             if (GameUiState.MenuOpen()) { if (_dragging) { _dragging = false; InputCompat.ReleaseDrag(Slot); } return; }
             Vector2 m = UiScale.ToLocal(InputCompat.MouseGuiPos(), _rect.x, _rect.y, _scale);
-            float rw = _rect.width, dh = 0f;
-            var rr = _resize.Handle(Slot, m, ref rw, ref dh, 460f, Mathf.Max(460f, Screen.width * 0.95f), 0f, 0f, false);
-            _rect.width = rw;
-            if (rr == PanelResize.Result.Reset) { _rect.width = 560f; Plugin.FitPanelWidth.Value = _rect.width; return; }
-            if (rr == PanelResize.Result.Committed) { Plugin.FitPanelWidth.Value = _rect.width; return; }
-            if (rr != PanelResize.Result.None) return;
+            if (!(_picker >= 0 || _matPicker))   // width is owned by the side-column when it's open; don't resize then
+            {
+                float rw = _rect.width, dh = 0f;
+                var rr = _resize.Handle(Slot, m, ref rw, ref dh, 460f, Mathf.Max(460f, Screen.width * 0.95f), 0f, 0f, false);
+                _rect.width = rw;
+                if (rr == PanelResize.Result.Reset) { _rect.width = 560f; Plugin.FitPanelWidth.Value = _rect.width; return; }
+                if (rr == PanelResize.Result.Committed) { Plugin.FitPanelWidth.Value = _rect.width; return; }
+                if (rr != PanelResize.Result.None) return;
+            }
             if (InputCompat.MousePressed())
             {
                 if (_closeRect.Contains(m)) { _visible = false; return; }
+                // side-column hits (picker stays open; the main view below is still live, so fall through)
                 if (_picker >= 0)
                 {
                     if (_backRect.Contains(m)) { _picker = -1; return; }
@@ -188,8 +193,7 @@ namespace TbhDpsMeter
                     if (_ppPrev.Contains(m)) { _pickerPage = Mathf.Max(0, _pickerPage - 1); return; }
                     if (_ppNext.Contains(m)) { _pickerPage++; return; }
                     for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
-                        if (_pickRects[i].Contains(m)) { SetSlot(_picker, _pickKeys[i]); _picker = -1; return; }
-                    return;
+                        if (_pickRects[i].Contains(m)) { SetSlot(_picker, _pickKeys[i]); return; }   // keep list open after a swap
                 }
                 if (_matPicker)
                 {
@@ -198,14 +202,13 @@ namespace TbhDpsMeter
                     if (_ppNext.Contains(m)) { _pickerPage++; return; }
                     for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
                         if (_pickRects[i].Contains(m)) { AddMat(_pickKeys[i]); _matPicker = false; return; }
-                    return;
                 }
                 if (_resetRect.Contains(m)) { ResetLoadout(); return; }
                 for (int i = 0; i < _tabRects.Count; i++)
-                    if (_tabRects[i].Contains(m)) { _heroIdx = i; _picker = -1; return; }
+                    if (_tabRects[i].Contains(m)) { _heroIdx = i; return; }   // keep the side-column open across heroes
                 for (int i = 0; i < _swapRects.Count; i++)
-                    if (_swapRects[i].Contains(m)) { _picker = i; _pickerPage = 0; _pickGrade = ""; return; }
-                if (_addMatRect.Contains(m)) { _matPicker = true; _pickerPage = 0; return; }
+                    if (_swapRects[i].Contains(m)) { _picker = i; _matPicker = false; _pickerPage = 0; _pickGrade = ""; return; }
+                if (_addMatRect.Contains(m)) { _matPicker = true; _picker = -1; _pickerPage = 0; return; }
                 for (int i = 0; i < _matRmRects.Count; i++)
                     if (_matRmRects[i].Contains(m)) { RemoveMat(i); return; }
                 if (_rect.Contains(m) && InputCompat.ClaimDrag(Slot)) { _dragging = true; _dragOffset = m - new Vector2(_rect.x, _rect.y); }
@@ -295,10 +298,15 @@ namespace TbhDpsMeter
             {
                 EnsureAssets(); if (!_placed) PlaceDefault(); if (!_loaded) Reload();
                 int fs = Plugin.FontSize.Value; float lh = fs + 6;
-                float x = _rect.x, ix = x + Pad, w = _rect.width, iw = w - Pad * 2;
+                // main column + optional item/material side-column to the RIGHT (expand, don't replace the page)
+                bool sideOpen = _picker >= 0 || _matPicker;
+                float baseW = Mathf.Max(560f, Plugin.FitPanelWidth.Value);
+                _rect.width = baseW + (sideOpen ? PickerW : 0f);
+                float x = _rect.x, ix = x + Pad, w = _rect.width, iw = baseW - Pad * 2;
 
                 int matN = (_heroMats.TryGetValue(CurHero, out var m0) && m0 != null) ? m0.Count : 0;
-                int rows = (_picker >= 0 || _matPicker) ? 18 : (3 + 1 + SlotParts.Length + 2 + matN);
+                int mainRows = 3 + 1 + SlotParts.Length + 2 + matN;
+                int rows = sideOpen ? Mathf.Max(mainRows, 18) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
                 _scale = UiScale.Fit(_rect.width, _rect.height);
@@ -310,8 +318,8 @@ namespace TbhDpsMeter
 
                 // title + reset + close
                 GUI.Label(new Rect(ix, cy, iw - 90, lh), $"{Loc.G("fit_title")} <size=10><color=#8a93a0>{GearDatabase.Count} items</color></size>", _title);
-                _resetRect = new Rect(x + w - 28 - 56, cy - 1, 56, lh); GUI.Button(_resetRect, Loc.G("sim_reset"), _btn);
-                _closeRect = new Rect(x + w - 26, cy - 2, 22, lh); GUI.Button(_closeRect, "✕", _btn);
+                _resetRect = new Rect(x + baseW - 28 - 56, cy - 1, 56, lh); GUI.Button(_resetRect, Loc.G("sim_reset"), _btn);
+                _closeRect = new Rect(x + baseW - 26, cy - 2, 22, lh); GUI.Button(_closeRect, "✕", _btn);
                 cy += lh;
 
                 if (_heroes.Count == 0)
@@ -321,9 +329,6 @@ namespace TbhDpsMeter
                 }
 
                 int hero = CurHero;
-
-                if (_picker >= 0) { DrawPicker(ix, cy, iw, lh, hero); _resize.DrawGrip(_white, _rect); return; }
-                if (_matPicker) { DrawMatPicker(ix, cy, iw, lh, hero); _resize.DrawGrip(_white, _rect); return; }
 
                 // hero tabs
                 _tabRects.Clear(); float tx = ix;
@@ -376,23 +381,36 @@ namespace TbhDpsMeter
                     string ghex = changed ? "7fffa0" : GradeHex(gt != null ? gt.Grade : "");
                     string slvl = (gt != null && gt.Level > 0) ? $" <size=10><color=#8a93a0>Lv{gt.Level}</color></size>" : "";
                     GUI.Label(new Rect(ix + 48 + lh, cy, iw - 48 - lh - 56, lh), $"<color=#{ghex}>{Nm(key)}</color>{slvl}", _label);
-                    var sr = new Rect(x + w - Pad - 52, cy + 1, 50, lh - 3); GUI.Button(sr, Loc.G("fit_swap"), _btn); _swapRects.Add(sr);
+                    bool open = _picker == s;
+                    var sr = new Rect(ix + iw - 52, cy + 1, 50, lh - 3);
+                    GUI.Button(sr, open ? "▸ " + Loc.G("fit_swap") : Loc.G("fit_swap"), _btn); _swapRects.Add(sr);
+                    if (open) DrawRect(ix - 2, cy, 2, lh, new Color(0.45f, 0.65f, 0.95f, 0.9f));   // marker: this slot's list is open
                     cy += lh;
                 }
 
                 // runes / materials (sandbox additions; their stats fold into the aggregation above)
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
                 GUI.Label(new Rect(ix, cy, iw - 70, lh), $"<color=#9fb4cc>{Loc.G("fit_runes")}</color>", _dim);
-                _addMatRect = new Rect(x + w - Pad - 64, cy, 62, lh - 2); GUI.Button(_addMatRect, Loc.G("fit_addmat"), _btn);
+                _addMatRect = new Rect(ix + iw - 64, cy, 62, lh - 2); GUI.Button(_addMatRect, Loc.G("fit_addmat"), _btn);
                 cy += lh;
                 _matRmRects.Clear();
                 if (sbMats != null)
                     for (int i = 0; i < sbMats.Count; i++)
                     {
                         GUI.Label(new Rect(ix + 12, cy, iw - 12 - 28, lh), $"<size=11><color=#bcd0ea>◆ {MatEffect(sbMats[i])}</color></size>", _label);
-                        var rm = new Rect(x + w - Pad - 26, cy + 1, 24, lh - 3); GUI.Button(rm, "×", _btn); _matRmRects.Add(rm);
+                        var rm = new Rect(ix + iw - 26, cy + 1, 24, lh - 3); GUI.Button(rm, "×", _btn); _matRmRects.Add(rm);
                         cy += lh;
                     }
+
+                // side column: the item / material list expands to the RIGHT of the bench
+                if (sideOpen)
+                {
+                    float divX = x + baseW;
+                    DrawRect(divX, _rect.y + Pad, 1, _rect.height - Pad * 2, new Color(1, 1, 1, 0.14f));
+                    float pix = divX + 8, piw = PickerW - 16, pcy = _rect.y + Pad + lh;
+                    if (_picker >= 0) DrawPicker(pix, pcy, piw, lh, hero);
+                    else DrawMatPicker(pix, pcy, piw, lh, hero);
+                }
                 _resize.DrawGrip(_white, _rect);
             }
             catch { }
@@ -401,7 +419,6 @@ namespace TbhDpsMeter
 
         private void DrawPicker(float ix, float cy, float iw, float lh, int hero)
         {
-            float x = _rect.x, w = _rect.width;
             _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ 返回", _btn);
             GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{SlotLabel[_picker]} — 選擇裝備</color>", _label);
             cy += lh;
@@ -479,7 +496,6 @@ namespace TbhDpsMeter
 
         private void DrawMatPicker(float ix, float cy, float iw, float lh, int hero)
         {
-            float x = _rect.x, w = _rect.width;
             _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ 返回", _btn);
             GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{Loc.G("fit_runes")} — 選材料</color>", _label);
             cy += lh;
