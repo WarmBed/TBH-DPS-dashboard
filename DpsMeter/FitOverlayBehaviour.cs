@@ -374,7 +374,8 @@ namespace TbhDpsMeter
                     if (stex != null) GUI.DrawTexture(new Rect(ix + 46, cy + 1, lh - 2, lh - 2), stex, ScaleMode.ScaleToFit);
                     var gt = GearDatabase.ByKey(key);
                     string ghex = changed ? "7fffa0" : GradeHex(gt != null ? gt.Grade : "");
-                    GUI.Label(new Rect(ix + 48 + lh, cy, iw - 48 - lh - 56, lh), $"<color=#{ghex}>{Nm(key)}</color>", _label);
+                    string slvl = (gt != null && gt.Level > 0) ? $" <size=10><color=#8a93a0>Lv{gt.Level}</color></size>" : "";
+                    GUI.Label(new Rect(ix + 48 + lh, cy, iw - 48 - lh - 56, lh), $"<color=#{ghex}>{Nm(key)}</color>{slvl}", _label);
                     var sr = new Rect(x + w - Pad - 52, cy + 1, 50, lh - 3); GUI.Button(sr, Loc.G("fit_swap"), _btn); _swapRects.Add(sr);
                     cy += lh;
                 }
@@ -464,7 +465,8 @@ namespace TbhDpsMeter
                 float tx = ix + rowH + 2;
                 // name in its grade colour at full size (✓ = the variant you own), stat summary beneath
                 string own = g.Key == ownedKey ? "<color=#7fffa0>✓</color> " : "";
-                GUI.Label(new Rect(tx, cy + 1, iw - rowH - 6, lh), $"{own}<color=#{GradeHex(g.Grade)}><b>{Nm(g.Key)}</b></color>", _label);
+                string lvl = g.Level > 0 ? $" <size=10><color=#8a93a0>Lv{g.Level}</color></size>" : "";
+                GUI.Label(new Rect(tx, cy + 1, iw - rowH - 6, lh), $"{own}<color=#{GradeHex(g.Grade)}><b>{Nm(g.Key)}</b></color>{lvl}", _label);
                 string stats = "";
                 foreach (var st in g.Stats) stats += $"{st.Stat.Substring(0, Math.Min(4, st.Stat.Length))}{(st.Mod == "FLAT" ? "+" : (st.Mod == "ADDITIVE" ? "%+" : "×"))}{st.Value:0}　";
                 GUI.Label(new Rect(tx, cy + lh - 1, iw - rowH - 6, lh), $"<size=10><color=#8a93a0>{stats}</color></size>", _tiny);
