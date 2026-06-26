@@ -292,7 +292,6 @@ namespace TbhDpsMeter
                 ClassInjector.RegisterTypeInIl2Cpp<GearScoreOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<ItemStatsOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<FarmOverlayBehaviour>();
-                ClassInjector.RegisterTypeInIl2Cpp<SimOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<FitOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<BoxOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<HubOverlayBehaviour>();
@@ -308,7 +307,6 @@ namespace TbhDpsMeter
                 go.AddComponent<GearScoreOverlayBehaviour>();
                 go.AddComponent<ItemStatsOverlayBehaviour>();
                 go.AddComponent<FarmOverlayBehaviour>();
-                go.AddComponent<SimOverlayBehaviour>();
                 go.AddComponent<FitOverlayBehaviour>();
                 go.AddComponent<BoxOverlayBehaviour>();
                 go.AddComponent<HubOverlayBehaviour>();
