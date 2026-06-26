@@ -276,6 +276,13 @@ namespace TbhDpsMeter
         }
         private static string FmtNum(double v) { double a = Math.Abs(v); if (a >= 1e6) return (v / 1e6).ToString("0.#") + "M"; if (a >= 1e3) return (v / 1e3).ToString("0.#") + "K"; return v.ToString("0.#"); }
         private static double Sv(Dictionary<string, double> agg, string k) { double v = 0; if (agg != null) agg.TryGetValue(k, out v); return v; }
+        private static string GradeHex(string grade)
+        {
+            if (string.IsNullOrEmpty(grade)) return "cdd5df";
+            string g = grade.ToLowerInvariant();
+            for (int i = 0; i < BoxGrade.Keys.Length; i++) if (BoxGrade.Keys[i] == g) return BoxOpenOverlayBehaviour.GradeHex(i);
+            return "cdd5df";
+        }
 
         void OnGUI()
         {
@@ -288,7 +295,7 @@ namespace TbhDpsMeter
                 float x = _rect.x, ix = x + Pad, w = _rect.width, iw = w - Pad * 2;
 
                 int matN = (_heroMats.TryGetValue(CurHero, out var m0) && m0 != null) ? m0.Count : 0;
-                int rows = (_picker >= 0 || _matPicker) ? 16 : (3 + 1 + SlotParts.Length + 2 + matN);
+                int rows = (_picker >= 0 || _matPicker) ? 18 : (3 + 1 + SlotParts.Length + 2 + matN);
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
                 _scale = UiScale.Fit(_rect.width, _rect.height);
@@ -359,8 +366,12 @@ namespace TbhDpsMeter
                     int key = (arr != null && s < arr.Length) ? arr[s] : 0;
                     bool changed = _orig.TryGetValue(hero, out var oa) && oa != null && s < oa.Length && oa[s] != key;
                     if ((s & 1) == 1) DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
-                    GUI.Label(new Rect(ix, cy, 46, lh), $"<color=#9aa3b0>{SlotLabel[s]}</color>", _label);
-                    GUI.Label(new Rect(ix + 50, cy, iw - 50 - 56, lh), (changed ? "<color=#7fffa0>" : "<color=#eaf3ee>") + Nm(key) + "</color>", _label);
+                    GUI.Label(new Rect(ix, cy, 44, lh), $"<color=#9aa3b0>{SlotLabel[s]}</color>", _label);
+                    var stex = GearIconCache.Get(key);
+                    if (stex != null) GUI.DrawTexture(new Rect(ix + 46, cy + 1, lh - 2, lh - 2), stex, ScaleMode.ScaleToFit);
+                    var gt = GearDatabase.ByKey(key);
+                    string ghex = changed ? "7fffa0" : GradeHex(gt != null ? gt.Grade : "");
+                    GUI.Label(new Rect(ix + 48 + lh, cy, iw - 48 - lh - 56, lh), $"<color=#{ghex}>{Nm(key)}</color>", _label);
                     var sr = new Rect(x + w - Pad - 52, cy + 1, 50, lh - 3); GUI.Button(sr, Loc.G("fit_swap"), _btn); _swapRects.Add(sr);
                     cy += lh;
                 }
@@ -404,20 +415,29 @@ namespace TbhDpsMeter
                     list = f;
                 }
             }
-            int per = 12; int pages = Mathf.Max(1, (list.Count + per - 1) / per);
+            int per = 8; float rowH = lh * 1.7f;
+            int pages = Mathf.Max(1, (list.Count + per - 1) / per);
             _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
             int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
             _pickRects.Clear(); _pickKeys.Clear();
             int curKey = (_load.TryGetValue(hero, out var arr) && _picker < arr.Length) ? arr[_picker] : 0;
             for (int i = 0; i < shown; i++)
             {
-                var g = list[start + i]; var r = new Rect(ix, cy, iw, lh - 1);
+                var g = list[start + i]; var r = new Rect(ix, cy, iw, rowH - 1);
                 bool cur = g.Key == curKey;
-                if (cur) DrawRect(ix, cy, iw, lh, new Color(0.30f, 0.45f, 0.75f, 0.30f)); else if ((i & 1) == 1) DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
+                if (cur) DrawRect(ix, cy, iw, rowH, new Color(0.30f, 0.45f, 0.75f, 0.30f)); else if ((i & 1) == 1) DrawRect(ix, cy, iw, rowH, new Color(1, 1, 1, 0.03f));
+                // icon (fetched lazily from the wiki by ItemKey; faint placeholder until it resolves)
+                var iconR = new Rect(ix + 3, cy + 3, rowH - 6, rowH - 6);
+                var tex = GearIconCache.Get(g.Key);
+                if (tex != null) GUI.DrawTexture(iconR, tex, ScaleMode.ScaleToFit);
+                else { var pc = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconR, _white); GUI.color = pc; }
+                float tx = ix + rowH + 2;
+                // name in its grade colour at full size, stat summary beneath
+                GUI.Label(new Rect(tx, cy + 1, iw - rowH - 6, lh), $"<color=#{GradeHex(g.Grade)}><b>{Nm(g.Key)}</b></color>", _label);
                 string stats = "";
-                foreach (var st in g.Stats) { stats += $" <size=9><color=#8a93a0>{st.Stat.Substring(0, Math.Min(4, st.Stat.Length))}{(st.Mod == "FLAT" ? "+" : (st.Mod == "ADDITIVE" ? "%+" : "×"))}{st.Value:0}</color></size>"; }
-                GUI.Label(new Rect(ix + 4, cy, iw - 8, lh), $"<size=10><color=#c8a24a>{g.Grade.Substring(0, Math.Min(2, g.Grade.Length))}</color></size> {Nm(g.Key)}{stats}", _label);
-                _pickRects.Add(r); _pickKeys.Add(g.Key); cy += lh;
+                foreach (var st in g.Stats) stats += $"{st.Stat.Substring(0, Math.Min(4, st.Stat.Length))}{(st.Mod == "FLAT" ? "+" : (st.Mod == "ADDITIVE" ? "%+" : "×"))}{st.Value:0}　";
+                GUI.Label(new Rect(tx, cy + lh - 1, iw - rowH - 6, lh), $"<size=10><color=#8a93a0>{stats}</color></size>", _tiny);
+                _pickRects.Add(r); _pickKeys.Add(g.Key); cy += rowH;
             }
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
             GUI.Button(_ppPrev, "◀", _btn); GUI.Button(_ppNext, "▶", _btn);
