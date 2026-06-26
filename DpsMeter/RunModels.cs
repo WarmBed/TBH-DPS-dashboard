@@ -86,6 +86,9 @@ namespace TbhDpsMeter
         public double ExpGained;
         /// <summary>Character level at the time of the run (from the save). 0 = unknown.</summary>
         public int Level;
+        /// <summary>Total damage this character dealt during the run (from the DPS tracker's per-character
+        /// rollup). 0 = not captured. Per-hero DPS ≈ DamageDealt / run active seconds; share = / run total.</summary>
+        public double DamageDealt;
 
         public bool HasAny => Stats.Count > 0 || Equipment.Count > 0 || Skills.Count > 0;
     }

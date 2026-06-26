@@ -404,6 +404,7 @@ class Tests
         snap.Equipment.Add(g);
         snap.Skills.Add(new SkillEntry("Arrow Rain", 3));
         snap.Character = "priest";
+        snap.DamageDealt = 88000;
         r.Party.Add(snap);
 
         string text = RunSerializer.Serialize(r);
@@ -423,6 +424,7 @@ class Tests
         Check("[ser] snapshot captured", snap2 != null && snap2.Captured, snap2 != null);
         Check("[ser] character id", snap2.Character == "priest", snap2.Character);
         Check("[ser] snap stat", snap2.Stats.Count == 1 && Near(snap2.Stats[0].Value, 1240), snap2.Stats.Count);
+        Check("[ser] snap per-hero damage", Near(snap2.DamageDealt, 88000), snap2.DamageDealt);
         Check("[ser] snap gear+affixes", snap2.Equipment.Count == 1 && snap2.Equipment[0].Affixes.Count == 2, snap2.Equipment.Count);
         Check("[ser] gear name preserved", snap2.Equipment[0].Name == "Flame Bow", snap2.Equipment[0].Name);
         Check("[ser] gear affix value", Near(snap2.Equipment[0].Affixes[1].Value, 5.5), snap2.Equipment[0].Affixes[1].Value);
