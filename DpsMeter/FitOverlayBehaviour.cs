@@ -276,13 +276,8 @@ namespace TbhDpsMeter
         }
         private static string FmtNum(double v) { double a = Math.Abs(v); if (a >= 1e6) return (v / 1e6).ToString("0.#") + "M"; if (a >= 1e3) return (v / 1e3).ToString("0.#") + "K"; return v.ToString("0.#"); }
         private static double Sv(Dictionary<string, double> agg, string k) { double v = 0; if (agg != null) agg.TryGetValue(k, out v); return v; }
-        private static string GradeHex(string grade)
-        {
-            if (string.IsNullOrEmpty(grade)) return "cdd5df";
-            string g = grade.ToLowerInvariant();
-            for (int i = 0; i < BoxGrade.Keys.Length; i++) if (BoxGrade.Keys[i] == g) return BoxOpenOverlayBehaviour.GradeHex(i);
-            return "cdd5df";
-        }
+        // gear-rarity hex (no leading '#') — same palette as the gear-score panel, one source of truth.
+        private static string GradeHex(string grade) => GearScoreOverlayBehaviour.GradeColor(grade);
 
         void OnGUI()
         {

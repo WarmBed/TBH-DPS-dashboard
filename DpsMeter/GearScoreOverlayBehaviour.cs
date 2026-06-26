@@ -350,8 +350,9 @@ namespace TbhDpsMeter
             }
         }
 
-        // grade -> hex colour across TBH's 10-tier rarity ladder. Unknown -> grey.
-        private static string GradeColor(string grade)
+        // grade -> hex colour (NO leading '#') across TBH's 10-tier rarity ladder. Unknown -> grey.
+        // Public so the fitting bench colours item names from the same proven palette (one source of truth).
+        public static string GradeColor(string grade)
         {
             switch ((grade ?? "").ToUpperInvariant())
             {
