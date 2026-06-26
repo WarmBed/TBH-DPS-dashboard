@@ -53,6 +53,8 @@ namespace TbhDpsMeter
         private int _runIndex;
         private bool _loaded;
         private int _seenVersion = -1;
+        private int _statScroll;              // stat-list scroll offset (rows); the 29-stat capture made this list long
+        private const int MaxStat = 9;        // visible stat rows before the rest is wheel-scrolled
 
         void Awake()
         {
@@ -79,6 +81,7 @@ namespace TbhDpsMeter
             {
                 InputCompat.Poll();
                 InputCompat.SetPanel(2, _visible && !GameUiState.MenuOpen(), ScaledRect());
+                if (_visible) { float wd = InputCompat.WheelDelta(2); if (wd > 0f) _statScroll--; else if (wd < 0f) _statScroll++; }
                 if (InputCompat.KeyPressed(Plugin.CompareToggleKey))
                 {
                     _visible = !_visible;
@@ -312,6 +315,7 @@ namespace TbhDpsMeter
 
                 // ---- measure ----
                 int statRows = cmp.Stats.Count;
+                int statVis = Mathf.Min(statRows, MaxStat);
                 int waveRows = Mathf.Min(cmp.Waves.Count, 8);
                 int gearRows = cmp.Gear.Count;
                 int skillRows = cmp.Skills.Count;
@@ -323,7 +327,7 @@ namespace TbhDpsMeter
                     || cmp.Baseline.GoldGained != 0 || cmp.Baseline.ExpGained != 0;
                 float rewardRows = hasRewards ? 6f + (cmp.Current.Boxes.Count > 0 ? 1 : 0) : 0f;
                 float leftH = lh + lh * coreRows
-                    + (statRows > 0 ? lh * 0.5f + lh * statRows : 0)
+                    + (statRows > 0 ? lh * 0.5f + lh * statVis + (statRows > MaxStat ? lh : 0) : 0)
                     + lh + 14 + 14 + lh * distRows
                     + lh + lh * waveRows;
                 int curSkills = cmp.CurrentSnap != null ? cmp.CurrentSnap.Skills.Count : 0;
@@ -428,8 +432,15 @@ namespace TbhDpsMeter
                 if (statRows > 0)
                 {
                     ly += lh * 0.5f;
-                    foreach (var st in cmp.Stats)
+                    _statScroll = Mathf.Clamp(_statScroll, 0, Mathf.Max(0, statRows - MaxStat));
+                    int send = Mathf.Min(_statScroll + MaxStat, statRows);
+                    for (int si = _statScroll; si < send; si++)
+                    {
+                        var st = cmp.Stats[si];
                         ly = Row2(ly, subW, lx, rxc, Loc.G(st.Key), FmtStat(st.Baseline), FmtStat(st.Current), DeltaColor(st.Baseline, st.Current, true));
+                    }
+                    if (statRows > MaxStat)
+                    { GUI.Label(new Rect(lx, ly, leftColW, lh), $"<size=10><color=#8a93a0>滾輪 ↕ {_statScroll + 1}–{send}/{statRows}</color></size>", _tiny); ly += lh; }
                 }
                 GUI.Label(new Rect(lx, ly, leftColW, lh), Loc.G("dmg_dist"), _dim); ly += lh;
                 DrawDist(lx + 34, ly, leftColW - 34, 11, baseline);
