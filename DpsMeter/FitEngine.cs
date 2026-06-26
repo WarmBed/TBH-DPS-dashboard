@@ -120,6 +120,45 @@ namespace TbhDpsMeter
         public static IReadOnlyList<GearTemplate> All => _all;
     }
 
+    /// <summary>High-level fitting helpers: turn a loadout (the equipped item keys) into aggregated stats,
+    /// CombatStats, and a formula DPS. Lives here (not in the injected panel) so the custom structs stay
+    /// out of any IL2CPP-scanned signature.</summary>
+    public static class FitCalc
+    {
+        /// <summary>Aggregate the stats of all items in a loadout (their templates' resolved stat lists).</summary>
+        public static Dictionary<string, double> LoadoutStats(IEnumerable<int> itemKeys)
+        {
+            var lines = new List<GearStat>();
+            if (itemKeys != null)
+                foreach (var k in itemKeys)
+                {
+                    var g = GearDatabase.ByKey(k);
+                    if (g != null) lines.AddRange(g.Stats);
+                }
+            return StatAggregator.Aggregate(lines);
+        }
+
+        public static CombatStats ToCombat(Dictionary<string, double> agg)
+        {
+            var c = new CombatStats();
+            if (agg != null)
+            {
+                agg.TryGetValue("AttackDamage", out c.AttackDamage);
+                agg.TryGetValue("AttackSpeed", out c.AttackSpeed);
+                agg.TryGetValue("CriticalChance", out c.CritChance);
+                agg.TryGetValue("CriticalDamage", out c.CritDamage);
+            }
+            return c;
+        }
+
+        /// <summary>Formula DPS for a loadout (placeholder formula until native decomp; used as a RATIO,
+        /// anchored to measured DPS by the caller).</summary>
+        public static double LoadoutDps(IEnumerable<int> itemKeys)
+        {
+            return DamageFormula.ExpectedDps(ToCombat(LoadoutStats(itemKeys)));
+        }
+    }
+
     /// <summary>Aggregates a set of gear/material stat lines into a per-StatType total, PoE-style:
     /// final = ΣFLAT × (1 + ΣADDITIVE/100) × Π(1 + MULTIPLICATIVE/100). The exact percent divisor is the
     /// game's (assumed 100 until the native damage-formula decomp confirms it); callers ANCHOR to the
