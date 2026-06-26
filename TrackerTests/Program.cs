@@ -138,6 +138,7 @@ class Tests
         JsonTests();
         FarmTests();
         FarmDivisorTests();
+        ClearTimeSimTests();
         RunRetentionTests();
         WavDecoderTests();
 
@@ -640,6 +641,91 @@ class Tests
         Check("[farm] legacy no-per-hero-exp falls back to party count (2)", FarmPlanner.EffectivePartyForExp(r3) == 2, FarmPlanner.EffectivePartyForExp(r3));
 
         Check("[farm] empty party divisor 0", FarmPlanner.EffectivePartyForExp(new RunRecord()) == 0, FarmPlanner.EffectivePartyForExp(new RunRecord()));
+    }
+
+    // ================= ClearTimeSim (DPS/speed what-if simulator) =================
+    static void ClearTimeSimTests()
+    {
+        Console.WriteLine("\n-- ClearTimeSim --");
+
+        // F = Σ share×mult: sorcerer(301) 60% ×1.5 + knight(101) 40% ×1.0 = 1.30
+        var shares = new System.Collections.Generic.Dictionary<int, double> { { 301, 0.6 }, { 101, 0.4 } };
+        var mult = new System.Collections.Generic.Dictionary<int, double> { { 301, 1.5 } };
+        Check("[sim] F = Σ share×mult = 1.30", Near(ClearTimeSim.PartyDpsFactor(shares, mult), 1.30), ClearTimeSim.PartyDpsFactor(shares, mult));
+
+        // a benched (0%-share) hero with a huge mult must NOT change F
+        var sharesB = new System.Collections.Generic.Dictionary<int, double> { { 101, 1.0 }, { 401, 0.0 } };
+        var multB = new System.Collections.Generic.Dictionary<int, double> { { 401, 5.0 } };
+        Check("[sim] benched 0%-share hero doesn't move F", Near(ClearTimeSim.PartyDpsFactor(sharesB, multB), 1.0), ClearTimeSim.PartyDpsFactor(sharesB, multB));
+
+        // no fight yet (empty shares) -> F clamps to 1 (no change)
+        Check("[sim] empty shares -> F=1", Near(ClearTimeSim.PartyDpsFactor(new System.Collections.Generic.Dictionary<int, double>(), mult), 1.0), ClearTimeSim.PartyDpsFactor(new System.Collections.Generic.Dictionary<int, double>(), mult));
+
+        // --- SimulateSplit: real measured 有效輸出/停輸出. DPS compresses active, speed compresses idle ---
+        var sd = ClearTimeSim.SimulateSplit(100, 0, 2.0, 1.0);   // pure active -> DPS×2 halves; speed irrelevant
+        Check("[sim] pure-active DPS×2 halves", Near(sd.NewClear, 50) && Near(sd.SavedPct, 0.5), sd.NewClear);
+        var ssp = ClearTimeSim.SimulateSplit(0, 100, 5.0, 2.0);  // pure idle -> speed×2 halves; DPS irrelevant
+        Check("[sim] pure-idle speed×2 halves", Near(ssp.NewClear, 50), ssp.NewClear);
+        var sm = ClearTimeSim.SimulateSplit(60, 40, 2.0, 1.0);   // 60/2 + 40 = 70
+        Check("[sim] split mixed newClear = 70", Near(sm.NewClear, 70) && Near(sm.SavedSec, 30), sm.NewClear);
+        Check("[sim] split dpsFrac = active/total = 0.6", Near(sm.DpsFrac, 0.6), sm.DpsFrac);
+        var sz = ClearTimeSim.SimulateSplit(0, 0, 2.0, 2.0);
+        Check("[sim] split zero -> nothing", Near(sz.NewClear, 0) && Near(sz.SavedSec, 0), sz.NewClear);
+        // the real 1-4 numbers (active 90.5 / idle 55.5), F=2.11: 38% is movement DPS can't touch -> ~33%, NOT 52%
+        var s14 = ClearTimeSim.SimulateSplit(90.5, 55.5, 2.11, 1.0);
+        Check("[sim] 1-4 real split saves ~33% (not 52%)", s14.SavedPct > 0.30 && s14.SavedPct < 0.36, s14.SavedPct);
+
+        // --- SimulateFallback: an uncleared stage uses an average active-fraction ---
+        var fb = ClearTimeSim.SimulateFallback(100, 0.6, 2.0, 1.0);   // 100*(0.6/2 + 0.4/1) = 70
+        Check("[sim] fallback mixed = 70", Near(fb.NewClear, 70), fb.NewClear);
+        var fb2 = ClearTimeSim.SimulateFallback(100, 1.0, 1.0, 5.0);  // all-active -> speed alone saves 0
+        Check("[sim] fallback dpsFrac=1: speed alone saves nothing", Near(fb2.SavedSec, 0), fb2.SavedSec);
+        var fb0 = ClearTimeSim.SimulateFallback(0, 0.6, 2.0, 2.0);
+        Check("[sim] fallback unknown clear (0) -> nothing", Near(fb0.NewClear, 0) && Near(fb0.SavedSec, 0), fb0.NewClear);
+
+        // --- AggregateTiming: median active/idle over a stage's runs that captured a split ---
+        var runs = new System.Collections.Generic.List<RunRecord>
+        {
+            new RunRecord { StageId = "3-6 TORMENT", ActiveSeconds = 90f, IdleSeconds = 50f },
+            new RunRecord { StageId = "3-6 TORMENT", ActiveSeconds = 110f, IdleSeconds = 60f },
+            new RunRecord { StageId = "3-6 TORMENT", ActiveSeconds = 0f, IdleSeconds = 0f },   // no split -> excluded
+            new RunRecord { StageId = "1-1 NORMAL", ActiveSeconds = 20f, IdleSeconds = 10f },
+        };
+        var tA = ClearTimeSim.AggregateTiming(runs, "3-6 TORMENT", null);
+        Check("[sim] aggregate has data, 2 samples", tA.HasData && tA.Samples == 2, tA.Samples);
+        Check("[sim] aggregate median active = 100", Near(tA.ActiveSec, 100), tA.ActiveSec);
+        Check("[sim] aggregate median idle = 55", Near(tA.IdleSec, 55), tA.IdleSec);
+        var tB = ClearTimeSim.AggregateTiming(runs, "9-9 HELL", null);
+        Check("[sim] aggregate no runs -> no data", !tB.HasData, tB.HasData);
+
+        // summary: avg savedPct over known rows; best by savedSec; 0-clear excluded
+        var rows = new System.Collections.Generic.List<SimRow>
+        {
+            ClearTimeSim.SimulateSplit(100, 0, 2.0, 1.0), // saved 50, 50%
+            ClearTimeSim.SimulateSplit(200, 0, 2.0, 1.0), // saved 100, 50%
+            ClearTimeSim.SimulateSplit(0, 0, 2.0, 1.0),   // excluded
+        };
+        var sum = ClearTimeSim.Summarize(rows, 2.0);
+        Check("[sim] summary counts only known-clear rows (2)", sum.Counted == 2, sum.Counted);
+        Check("[sim] summary avg savedPct = 0.5", Near(sum.AvgSavedPct, 0.5), sum.AvgSavedPct);
+        Check("[sim] summary best index = 1 (saved 100s)", sum.BestIndex == 1, sum.BestIndex);
+        Check("[sim] summary carries party DPS factor", Near(sum.PartyDpsFactor, 2.0), sum.PartyDpsFactor);
+
+        // --- BuildStat: sum a run's gear stat (stable key e.g. "AoE"=range), per-hero or whole party ---
+        var run = new RunRecord();
+        var mage = new CharacterSnapshot { Character = "301" };
+        var mg1 = new GearItem(); mg1.Affixes.Add(new Affix("AoE", 100)); mg1.Affixes.Add(new Affix("attack", 50));
+        var mg2 = new GearItem(); mg2.Affixes.Add(new Affix("AoE", 60));
+        mage.Equipment.Add(mg1); mage.Equipment.Add(mg2);
+        var knight = new CharacterSnapshot { Character = "101" };
+        var kg1 = new GearItem(); kg1.Affixes.Add(new Affix("AoE", 30));
+        knight.Equipment.Add(kg1);
+        run.Party.Add(mage); run.Party.Add(knight);
+        Check("[sim] BuildStat per-hero range (mage AoE = 160)", Near(ClearTimeSim.BuildStat(run, "AoE", "301"), 160), ClearTimeSim.BuildStat(run, "AoE", "301"));
+        Check("[sim] BuildStat whole-party range (190)", Near(ClearTimeSim.BuildStat(run, "AoE", null), 190), ClearTimeSim.BuildStat(run, "AoE", null));
+        Check("[sim] BuildStat per-hero attack (mage = 50)", Near(ClearTimeSim.BuildStat(run, "attack", "301"), 50), ClearTimeSim.BuildStat(run, "attack", "301"));
+        Check("[sim] BuildStat missing stat -> 0", Near(ClearTimeSim.BuildStat(run, "mspd", "301"), 0), ClearTimeSim.BuildStat(run, "mspd", "301"));
+        Check("[sim] BuildStat unknown hero -> 0", Near(ClearTimeSim.BuildStat(run, "AoE", "999"), 0), ClearTimeSim.BuildStat(run, "AoE", "999"));
     }
 
     // ================= RunRetention (per-stage history) =================

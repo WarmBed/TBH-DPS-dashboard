@@ -75,6 +75,12 @@ namespace TbhDpsMeter
         public static ConfigEntry<bool> FarmStartVisible;
         private static ConfigEntry<string> _farmToggleKeyName;
 
+        // clear-time simulator panel config (hub-only, no hotkey)
+        public static ConfigEntry<float> SimPosX;
+        public static ConfigEntry<float> SimPosY;
+        public static ConfigEntry<float> SimPanelWidth;
+        public static ConfigEntry<bool> SimStartVisible;
+
         // box-log panel config
         public static ConfigEntry<float> BoxPosX;
         public static ConfigEntry<float> BoxPosY;
@@ -185,6 +191,11 @@ namespace TbhDpsMeter
             FarmStartVisible = Config.Bind("FarmUI", "StartVisible", false, "Show the farming-planner overlay on launch.");
             _farmToggleKeyName = Config.Bind("FarmUI", "ToggleKey", "F6", "Key to show/hide the farming-planner overlay (UnityEngine.KeyCode name).");
 
+            SimPosX = Config.Bind("SimUI", "PosX", -1f, "Clear-time simulator overlay X (auto-saved when dragged). -1 = auto.");
+            SimPosY = Config.Bind("SimUI", "PosY", -1f, "Clear-time simulator overlay Y (auto-saved when dragged). -1 = auto.");
+            SimPanelWidth = Config.Bind("SimUI", "PanelWidth", 520f, "Clear-time simulator overlay panel width in pixels.");
+            SimStartVisible = Config.Bind("SimUI", "StartVisible", false, "Show the clear-time simulator overlay on launch.");
+
             BoxPosX = Config.Bind("BoxUI", "PosX", -1f, "Box-log overlay X (auto-saved when dragged). -1 = auto.");
             BoxPosY = Config.Bind("BoxUI", "PosY", -1f, "Box-log overlay Y (auto-saved when dragged). -1 = auto.");
             BoxPanelWidth = Config.Bind("BoxUI", "PanelWidth", 420f, "Box-log overlay panel width in pixels.");
@@ -270,6 +281,7 @@ namespace TbhDpsMeter
                 ClassInjector.RegisterTypeInIl2Cpp<GearScoreOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<ItemStatsOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<FarmOverlayBehaviour>();
+                ClassInjector.RegisterTypeInIl2Cpp<SimOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<BoxOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<HubOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<BoxOpenOverlayBehaviour>();
@@ -284,6 +296,7 @@ namespace TbhDpsMeter
                 go.AddComponent<GearScoreOverlayBehaviour>();
                 go.AddComponent<ItemStatsOverlayBehaviour>();
                 go.AddComponent<FarmOverlayBehaviour>();
+                go.AddComponent<SimOverlayBehaviour>();
                 go.AddComponent<BoxOverlayBehaviour>();
                 go.AddComponent<HubOverlayBehaviour>();
                 go.AddComponent<BoxOpenOverlayBehaviour>();
