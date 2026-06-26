@@ -43,11 +43,12 @@ namespace TbhDpsMeter
         private static readonly Dictionary<int, GearTemplate> _byKey = new Dictionary<int, GearTemplate>();
         private static readonly Dictionary<string, List<GearTemplate>> _bySlot = new Dictionary<string, List<GearTemplate>>();
         private static readonly Dictionary<int, List<MatTier>> _mats = new Dictionary<int, List<MatTier>>();
+        private static readonly List<int> _matKeyList = new List<int>();
         public static bool Loaded { get; private set; }
 
         public static void Reset()
         {
-            _all.Clear(); _byKey.Clear(); _bySlot.Clear(); _mats.Clear(); Loaded = false;
+            _all.Clear(); _byKey.Clear(); _bySlot.Clear(); _mats.Clear(); _matKeyList.Clear(); Loaded = false;
         }
 
         /// <summary>Parse fit_gear.json (array of {k,t,g,l,p,n,s:[[stat,mod,val]...]}).</summary>
@@ -110,6 +111,7 @@ namespace TbhDpsMeter
                         });
                     }
                 _mats[key] = tiers;
+                _matKeyList.Add(key);
             }
         }
 
@@ -117,6 +119,7 @@ namespace TbhDpsMeter
         public static GearTemplate ByKey(int key) { _byKey.TryGetValue(key, out var g); return g; }
         public static List<GearTemplate> BySlot(string slot) { _bySlot.TryGetValue(slot ?? "", out var l); return l ?? new List<GearTemplate>(); }
         public static List<MatTier> Material(int key) { _mats.TryGetValue(key, out var l); return l ?? new List<MatTier>(); }
+        public static IReadOnlyList<int> MaterialKeys => _matKeyList;
         public static IReadOnlyList<GearTemplate> All => _all;
     }
 
@@ -156,6 +159,35 @@ namespace TbhDpsMeter
         public static double LoadoutDps(IEnumerable<int> itemKeys)
         {
             return DamageFormula.ExpectedDps(ToCombat(LoadoutStats(itemKeys)));
+        }
+
+        /// <summary>The stat lines granted by a set of applied materials, each given as [StatModKey, Tier].</summary>
+        public static List<GearStat> MaterialStats(IEnumerable<int[]> mats)
+        {
+            var lines = new List<GearStat>();
+            if (mats != null)
+                foreach (var mt in mats)
+                {
+                    if (mt == null || mt.Length < 2) continue;
+                    foreach (var t in GearDatabase.Material(mt[0]))
+                        if (t.Tier == mt[1]) { lines.Add(new GearStat(t.Stat, t.Mod, t.Mid)); break; }
+                }
+            return lines;
+        }
+
+        /// <summary>Aggregate gear loadout + applied materials together.</summary>
+        public static Dictionary<string, double> LoadoutStats(IEnumerable<int> itemKeys, IEnumerable<int[]> mats)
+        {
+            var lines = new List<GearStat>();
+            if (itemKeys != null)
+                foreach (var k in itemKeys) { var g = GearDatabase.ByKey(k); if (g != null) lines.AddRange(g.Stats); }
+            lines.AddRange(MaterialStats(mats));
+            return StatAggregator.Aggregate(lines);
+        }
+
+        public static double LoadoutDps(IEnumerable<int> itemKeys, IEnumerable<int[]> mats)
+        {
+            return DamageFormula.ExpectedDps(ToCombat(LoadoutStats(itemKeys, mats)));
         }
     }
 

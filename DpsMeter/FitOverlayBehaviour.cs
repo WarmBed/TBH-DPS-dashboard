@@ -61,8 +61,12 @@ namespace TbhDpsMeter
         private readonly Dictionary<int, int[]> _orig = new Dictionary<int, int[]>();  // real equipped (anchor)
         private readonly Dictionary<int, int[]> _load = new Dictionary<int, int[]>();   // sandbox (editable)
         private readonly Dictionary<int, double> _measDps = new Dictionary<int, double>();
+        private readonly Dictionary<int, List<int[]>> _heroMats = new Dictionary<int, List<int[]>>();  // hero -> [matKey,tier]
         private int _picker = -1;       // slot whose item list is open (-1 = main view)
+        private bool _matPicker;        // material-list picker open
         private int _pickerPage;
+        private Rect _addMatRect;
+        private readonly List<Rect> _matRmRects = new List<Rect>();
 
         private Rect _closeRect, _resetRect, _backRect;
         private readonly List<Rect> _tabRects = new List<Rect>();
@@ -179,11 +183,23 @@ namespace TbhDpsMeter
                         if (_pickRects[i].Contains(m)) { SetSlot(_picker, _pickKeys[i]); _picker = -1; return; }
                     return;
                 }
+                if (_matPicker)
+                {
+                    if (_backRect.Contains(m)) { _matPicker = false; return; }
+                    if (_ppPrev.Contains(m)) { _pickerPage = Mathf.Max(0, _pickerPage - 1); return; }
+                    if (_ppNext.Contains(m)) { _pickerPage++; return; }
+                    for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
+                        if (_pickRects[i].Contains(m)) { AddMat(_pickKeys[i]); _matPicker = false; return; }
+                    return;
+                }
                 if (_resetRect.Contains(m)) { ResetLoadout(); return; }
                 for (int i = 0; i < _tabRects.Count; i++)
                     if (_tabRects[i].Contains(m)) { _heroIdx = i; _picker = -1; return; }
                 for (int i = 0; i < _swapRects.Count; i++)
                     if (_swapRects[i].Contains(m)) { _picker = i; _pickerPage = 0; return; }
+                if (_addMatRect.Contains(m)) { _matPicker = true; _pickerPage = 0; return; }
+                for (int i = 0; i < _matRmRects.Count; i++)
+                    if (_matRmRects[i].Contains(m)) { RemoveMat(i); return; }
                 if (_rect.Contains(m) && InputCompat.ClaimDrag(Slot)) { _dragging = true; _dragOffset = m - new Vector2(_rect.x, _rect.y); }
             }
             if (_dragging)
@@ -204,6 +220,26 @@ namespace TbhDpsMeter
         {
             int h = CurHero;
             if (_orig.TryGetValue(h, out var o)) { var c = new int[o.Length]; Array.Copy(o, c, o.Length); _load[h] = c; }
+            _heroMats.Remove(h);
+        }
+        private void AddMat(int matKey)
+        {
+            int h = CurHero; if (h == 0) return;
+            if (!_heroMats.TryGetValue(h, out var l)) { l = new List<int[]>(); _heroMats[h] = l; }
+            int maxT = 1; foreach (var t in GearDatabase.Material(matKey)) if (t.Tier > maxT) maxT = t.Tier;
+            l.Add(new int[] { matKey, maxT });
+        }
+        private void RemoveMat(int idx)
+        {
+            int h = CurHero;
+            if (_heroMats.TryGetValue(h, out var l) && idx >= 0 && idx < l.Count) l.RemoveAt(idx);
+        }
+        private static string MatEffect(int[] mt)
+        {
+            if (mt == null || mt.Length < 2) return "";
+            foreach (var t in GearDatabase.Material(mt[0]))
+                if (t.Tier == mt[1]) return $"{t.Stat} {(t.Mod == "FLAT" ? "+" : (t.Mod == "ADDITIVE" ? "%+" : "×"))}{t.Mid:0} <size=9>T{mt[1]}</size>";
+            return "#" + mt[0];
         }
 
         // ---------------- rendering ----------------
@@ -230,7 +266,14 @@ namespace TbhDpsMeter
             switch (heroKey / 100) { case 1: return new Color(0.90f, 0.78f, 0.35f); case 2: return new Color(0.40f, 0.86f, 0.46f); case 3: return new Color(0.55f, 0.60f, 0.97f); case 4: return new Color(0.95f, 0.62f, 0.40f); }
             return new Color(0.6f, 0.64f, 0.7f);
         }
-        private static string Nm(int itemKey) { var g = GearDatabase.ByKey(itemKey); return g != null ? (string.IsNullOrEmpty(g.NameKey) ? ("#" + itemKey) : g.NameKey) : (itemKey == 0 ? "—" : ("#" + itemKey)); }
+        private static string Nm(int itemKey)
+        {
+            if (itemKey == 0) return "—";
+            string n = ItemNameStore.Get(itemKey);
+            if (!string.IsNullOrEmpty(n)) return n;
+            var g = GearDatabase.ByKey(itemKey);
+            return g != null && !string.IsNullOrEmpty(g.NameKey) ? g.NameKey : ("#" + itemKey);
+        }
         private static string FmtNum(double v) { double a = Math.Abs(v); if (a >= 1e6) return (v / 1e6).ToString("0.#") + "M"; if (a >= 1e3) return (v / 1e3).ToString("0.#") + "K"; return v.ToString("0.#"); }
         private static double Sv(Dictionary<string, double> agg, string k) { double v = 0; if (agg != null) agg.TryGetValue(k, out v); return v; }
 
@@ -244,7 +287,8 @@ namespace TbhDpsMeter
                 int fs = Plugin.FontSize.Value; float lh = fs + 6;
                 float x = _rect.x, ix = x + Pad, w = _rect.width, iw = w - Pad * 2;
 
-                int rows = _picker >= 0 ? 16 : (3 + 1 + SlotParts.Length + 2);
+                int matN = (_heroMats.TryGetValue(CurHero, out var m0) && m0 != null) ? m0.Count : 0;
+                int rows = (_picker >= 0 || _matPicker) ? 16 : (3 + 1 + SlotParts.Length + 2 + matN);
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
                 _scale = UiScale.Fit(_rect.width, _rect.height);
@@ -269,6 +313,7 @@ namespace TbhDpsMeter
                 int hero = CurHero;
 
                 if (_picker >= 0) { DrawPicker(ix, cy, iw, lh, hero); _resize.DrawGrip(_white, _rect); return; }
+                if (_matPicker) { DrawMatPicker(ix, cy, iw, lh, hero); _resize.DrawGrip(_white, _rect); return; }
 
                 // hero tabs
                 _tabRects.Clear(); float tx = ix;
@@ -285,8 +330,9 @@ namespace TbhDpsMeter
 
                 // computed stats (sandbox) + anchored DPS
                 var sbKeys = KeysOf(_load, hero);
-                var agg = FitCalc.LoadoutStats(sbKeys);
-                double sbDps = FitCalc.LoadoutDps(sbKeys);
+                List<int[]> sbMats; _heroMats.TryGetValue(hero, out sbMats);
+                var agg = FitCalc.LoadoutStats(sbKeys, sbMats);
+                double sbDps = FitCalc.LoadoutDps(sbKeys, sbMats);
                 double origDps = FitCalc.LoadoutDps(KeysOf(_orig, hero));
                 double meas; _measDps.TryGetValue(hero, out meas);
                 double ratio = origDps > 0 ? sbDps / origDps : 1.0;
@@ -318,6 +364,20 @@ namespace TbhDpsMeter
                     var sr = new Rect(x + w - Pad - 52, cy + 1, 50, lh - 3); GUI.Button(sr, Loc.G("fit_swap"), _btn); _swapRects.Add(sr);
                     cy += lh;
                 }
+
+                // runes / materials (sandbox additions; their stats fold into the aggregation above)
+                DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
+                GUI.Label(new Rect(ix, cy, iw - 70, lh), $"<color=#9fb4cc>{Loc.G("fit_runes")}</color>", _dim);
+                _addMatRect = new Rect(x + w - Pad - 64, cy, 62, lh - 2); GUI.Button(_addMatRect, Loc.G("fit_addmat"), _btn);
+                cy += lh;
+                _matRmRects.Clear();
+                if (sbMats != null)
+                    for (int i = 0; i < sbMats.Count; i++)
+                    {
+                        GUI.Label(new Rect(ix + 12, cy, iw - 12 - 28, lh), $"<size=11><color=#bcd0ea>◆ {MatEffect(sbMats[i])}</color></size>", _label);
+                        var rm = new Rect(x + w - Pad - 26, cy + 1, 24, lh - 3); GUI.Button(rm, "×", _btn); _matRmRects.Add(rm);
+                        cy += lh;
+                    }
                 _resize.DrawGrip(_white, _rect);
             }
             catch { }
@@ -343,12 +403,37 @@ namespace TbhDpsMeter
                 if (cur) DrawRect(ix, cy, iw, lh, new Color(0.30f, 0.45f, 0.75f, 0.30f)); else if ((i & 1) == 1) DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
                 string stats = "";
                 foreach (var st in g.Stats) { stats += $" <size=9><color=#8a93a0>{st.Stat.Substring(0, Math.Min(4, st.Stat.Length))}{(st.Mod == "FLAT" ? "+" : (st.Mod == "ADDITIVE" ? "%+" : "×"))}{st.Value:0}</color></size>"; }
-                GUI.Label(new Rect(ix + 4, cy, iw - 8, lh), $"<size=10><color=#c8a24a>{g.Grade.Substring(0, Math.Min(2, g.Grade.Length))}</color></size> {g.NameKey}{stats}", _label);
+                GUI.Label(new Rect(ix + 4, cy, iw - 8, lh), $"<size=10><color=#c8a24a>{g.Grade.Substring(0, Math.Min(2, g.Grade.Length))}</color></size> {Nm(g.Key)}{stats}", _label);
                 _pickRects.Add(r); _pickKeys.Add(g.Key); cy += lh;
             }
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
             GUI.Button(_ppPrev, "◀", _btn); GUI.Button(_ppNext, "▶", _btn);
             GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<size=11><color=#9fb4cc>{_pickerPage + 1}/{pages}　{list.Count} 件</color></size>", _dim);
+        }
+
+        private void DrawMatPicker(float ix, float cy, float iw, float lh, int hero)
+        {
+            float x = _rect.x, w = _rect.width;
+            _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ 返回", _btn);
+            GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{Loc.G("fit_runes")} — 選材料</color>", _label);
+            cy += lh;
+            var keys = GearDatabase.MaterialKeys;
+            int per = 12; int pages = Mathf.Max(1, (keys.Count + per - 1) / per);
+            _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
+            int start = _pickerPage * per; int shown = Mathf.Min(per, keys.Count - start);
+            _pickRects.Clear(); _pickKeys.Clear();
+            for (int i = 0; i < shown; i++)
+            {
+                int mk = keys[start + i];
+                MatTier top = default; foreach (var t in GearDatabase.Material(mk)) if (t.Tier >= top.Tier) top = t;
+                var r = new Rect(ix, cy, iw, lh - 1); if ((i & 1) == 1) DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
+                string sym = top.Mod == "FLAT" ? "+" : (top.Mod == "ADDITIVE" ? "%+" : "×");
+                GUI.Label(new Rect(ix + 4, cy, iw - 8, lh), $"<size=11><color=#eaf3ee>{top.Stat}</color> <color=#8a93a0>{sym}{top.Min:0}~{top.Max:0} (max T{top.Tier})</color></size>", _label);
+                _pickRects.Add(r); _pickKeys.Add(mk); cy += lh;
+            }
+            _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
+            GUI.Button(_ppPrev, "◀", _btn); GUI.Button(_ppNext, "▶", _btn);
+            GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<size=11><color=#9fb4cc>{_pickerPage + 1}/{pages}　{keys.Count} 材料</color></size>", _dim);
         }
     }
 }

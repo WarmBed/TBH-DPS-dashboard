@@ -261,6 +261,8 @@ namespace TbhDpsMeter
                 "读不到角色装备——先进游戏、清一关再开",
                 "Sin equipo leído — entra al juego / limpia una etapa" } },
             { "fit_swap",       new[] { "換", "Swap", "替", "换", "Cambiar" } },
+            { "fit_runes",      new[] { "符文/材料", "Runes/Mats", "ルーン/素材", "符文/材料", "Runas" } },
+            { "fit_addmat",     new[] { "+材料", "+Mat", "+素材", "+材料", "+Mat" } },
             { "sim_base",       new[] { "原通關", "Base", "元", "原通关", "Base" } },
             { "sim_new",        new[] { "模擬", "Sim", "予測", "模拟", "Sim" } },
             { "sim_saved",      new[] { "省秒", "Saved", "短縮", "省秒", "Ahorro" } },
