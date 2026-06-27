@@ -43,6 +43,7 @@ namespace TbhDpsMeter
 
             var rem = new double[count];
             for (int i = 0; i < count; i++) rem[i] = hp;
+            var pick = new int[count];     // the distinct targets struck by one cast (lowest-HP first)
             int alive = count;
             double t = 0;
             long guard = 0, guardMax = (long)count * 1000 + 1000;   // backstop vs a non-killing config
@@ -54,13 +55,26 @@ namespace TbhDpsMeter
                 t = te;
                 var a = atks[ke];
                 int hits = Math.Min(a.Targets < 1 ? 1 : a.Targets, alive);
+                // pick `hits` DISTINCT lowest-HP alive monsters (finish-off / spread), then damage each ONCE — a
+                // multi-target cast must not re-hit the same monster (that was an AoE under-credit bug).
+                int picked = 0;
                 for (int h = 0; h < hits; h++)
                 {
                     int li = -1; double lo = double.MaxValue;
-                    for (int i = 0; i < count; i++) if (rem[i] > 0 && rem[i] < lo) { lo = rem[i]; li = i; }
+                    for (int i = 0; i < count; i++)
+                    {
+                        if (rem[i] <= 0 || rem[i] >= lo) continue;
+                        bool already = false;
+                        for (int p = 0; p < picked; p++) if (pick[p] == i) { already = true; break; }
+                        if (!already) { lo = rem[i]; li = i; }
+                    }
                     if (li < 0) break;
-                    rem[li] -= a.PerHit;            // overkill: excess is simply lost
-                    if (rem[li] <= 0) alive--;
+                    pick[picked++] = li;
+                }
+                for (int p = 0; p < picked; p++)
+                {
+                    rem[pick[p]] -= a.PerHit;        // overkill: excess is simply lost
+                    if (rem[pick[p]] <= 0) alive--;
                 }
                 nextT[ke] = t + a.Interval;
             }

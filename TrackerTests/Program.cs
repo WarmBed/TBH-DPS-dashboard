@@ -712,6 +712,10 @@ class Tests
         Check("[wave] two 10/1s streams kill 100hp in 5s", Near(WaveSim.WaveTime(100, 1, two), 5), WaveSim.WaveTime(100, 1, two));
         Check("[wave] no usable stream = +inf", double.IsPositiveInfinity(WaveSim.WaveTime(100, 1, new System.Collections.Generic.List<AtkStream>())), -1);
         // StageTime: 2 waves × (0.8 spawn + 5s battle) + 4.25 end, no approach/entry/boss = 2*(5.8)+4.25 = 15.85
+        // AoE multi-target must hit DISTINCT monsters (not re-hit the lowest): 3×100hp, T3 @60perHit ⇒
+        // cast1 each→40, cast2 each→dead = 2 casts = 2s. The re-hit bug would take 3 casts (3s).
+        var aoeMulti = new System.Collections.Generic.List<AtkStream> { new AtkStream(60, 1, 3) };
+        Check("[wave] AoE(T3) strikes DISTINCT monsters: 3×100hp /60 = 2 casts = 2s", Near(WaveSim.WaveTime(100, 3, aoeMulti), 2), WaveSim.WaveTime(100, 3, aoeMulti));
         double st = WaveSim.StageTime(2, 5, 100, bigHit, 0, 0, 0);
         Check("[wave] StageTime 2w×(0.8+5)+4.25 = 15.85", Near(st, 15.85, 0.01), st);
         var fb2 = ClearTimeSim.SimulateFallback(100, 1.0, 1.0, 5.0);  // all-active -> speed alone saves 0

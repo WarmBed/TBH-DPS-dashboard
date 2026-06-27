@@ -75,7 +75,7 @@ namespace TbhDpsMeter
         public const int AoeTargets = 2;   // calibrated: drip-spawn + spread ⇒ a nuke effectively hits ~2 at a time
 
         public static List<AtkStream> Build(int heroKey, double attack, double aspd, double critRate, double critDmg, double cdr,
-            IList<int> skillKeys, IList<int> skillLevels)
+            IList<int> skillKeys, IList<int> skillLevels, double aoeMult = 1.0)
         {
             var streams = new List<AtkStream>();
             if (attack <= 0 || aspd <= 0) return streams;
@@ -86,13 +86,13 @@ namespace TbhDpsMeter
                 {
                     if (skillKeys[i] == baseKey) baseInList = true;
                     int lvl = (skillLevels != null && i < skillLevels.Count) ? skillLevels[i] : 1;
-                    Add(streams, skillKeys[i], lvl, attack, critRate, critDmg, aspd, cdr);
+                    Add(streams, skillKeys[i], lvl, attack, critRate, critDmg, aspd, cdr, aoeMult);
                 }
-            if (!baseInList) Add(streams, baseKey, 1, attack, critRate, critDmg, aspd, cdr);
+            if (!baseInList) Add(streams, baseKey, 1, attack, critRate, critDmg, aspd, cdr, aoeMult);
             return streams;
         }
 
-        static void Add(List<AtkStream> streams, int key, int lvl, double attack, double critRate, double critDmg, double aspd, double cdr)
+        static void Add(List<AtkStream> streams, int key, int lvl, double attack, double critRate, double critDmg, double aspd, double cdr, double aoeMult)
         {
             if (!SkillDb.TryGet(key, out var s)) return;
             double interval;
@@ -101,7 +101,9 @@ namespace TbhDpsMeter
             else if (s.Act == 2) interval = s.Av > 0 ? Math.Max(0.1, s.Av * (1.0 - cdr)) : 0;
             else return;
             if (interval <= 0) return;
-            int targets = s.Aoe ? AoeTargets : 1;
+            // AoE target count scales with the 範圍/AreaOfEffect stat (verified: detect radius = base × AoE mult,
+            // radial test over all alive units, no count cap). Baseline AoeTargets=2 ⇒ the RATIO is what moves it.
+            int targets = s.Aoe ? Math.Max(1, (int)Math.Round(AoeTargets * (aoeMult > 0 ? aoeMult : 1.0))) : 1;
             double coeff = s.Coeff(lvl);
             // Split crit vs non-crit so OVERKILL is judged per hit-type, not on the average. A normal (non-crit)
             // hit = attack·coeff lands (1−critRate) of the time; a crit = attack·critDmg·coeff lands critRate of

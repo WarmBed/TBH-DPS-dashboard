@@ -94,7 +94,12 @@ namespace TbhDpsMeter
         // cached iterative clear-time sim (recomputed only when the sandbox streams change — WaveSim is heavy)
         private readonly List<string> _simStage = new List<string>();
         private readonly List<double> _simBase = new List<double>(), _simNew = new List<double>(), _simFloor = new List<double>();
-        private int _simHash = -1;
+        private readonly List<double> _simRatio = new List<double>();   // per-stage battle ratio bSb/bCur (for the per-wave drill-down)
+        private readonly List<bool> _simCadence = new List<bool>();     // per-stage: damage-saturated (one-shot ⇒ only aspd/CDR/AoE help)
+        private int _simHash = -1, _simExpand = -1;                     // _simExpand = stage row expanded into per-wave rows (-1 = none)
+        private readonly List<Rect> _clearRowRects = new List<Rect>();   // clickable stage rows (→ per-wave drill-down)
+        // per-wave grid column count (shared by the height calc + the draw so they never disagree)
+        private static int PerWaveCols(float w) => Mathf.Clamp((int)((w - 12) / 132f), 2, 8);
         // flat/percent split of the orig + sandbox loadouts, for live-anchored stat display (set each frame in OnGUI)
         private Dictionary<string, double> _fpFlatO, _fpPctO, _fpFlatN, _fpPctN;
         private float _savedFlash;      // frame counter for the "已儲存" toast
@@ -352,6 +357,8 @@ namespace TbhDpsMeter
                 }
                 if (_resetRect.Contains(m)) { ResetLoadout(); return; }
                 if (_clearHeadRect.Contains(m) && Plugin.FitShowClear != null) { Plugin.FitShowClear.Value = !Plugin.FitShowClear.Value; _simHash = -1; return; }
+                for (int i = 0; i < _clearRowRects.Count; i++)
+                    if (_clearRowRects[i].Contains(m)) { _simExpand = (_simExpand == i) ? -1 : i; return; }   // toggle per-wave drill-down
                 // click a gear slot in any column → focus that (hero, slot); the picker on the right follows
                 for (int i = 0; i < _focusRects.Count && i < _colHero.Count && i < _colSlot.Count; i++)
                     if (_focusRects[i].Contains(m)) { FocusColumn(_colHero[i], _colSlot[i]); return; }
@@ -541,7 +548,12 @@ namespace TbhDpsMeter
                     if (sr > maxSlotRows) maxSlotRows = sr;
                 }
                 bool showClearBlock = Plugin.FitShowClear == null || Plugin.FitShowClear.Value;
-                int clearRows = !showClearBlock ? 1 : (_clearStages.Count > 0 ? _clearStages.Count + 3 : 2);   // collapsed = just the title
+                int clearRows = !showClearBlock ? 1 : (_clearStages.Count > 0 ? _clearStages.Count + 6 : 2);   // collapsed = just the title; +3 rows = formula notes
+                if (showClearBlock && _simExpand >= 0 && _simExpand < _clearStages.Count)   // reserve rows for the per-wave grid
+                {
+                    int nw = _clearStages[_simExpand].WaveDurations != null ? _clearStages[_simExpand].WaveDurations.Count : 0;
+                    if (nw > 0) clearRows += (int)System.Math.Ceiling(nw / (double)PerWaveCols(baseW - Pad * 2)) + 2;
+                }
                 int mainRows = clearRows + 6 + maxSlotRows;   // clear-time + (header+dps+4 stat-rows) + gear+chip-sockets
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
@@ -878,11 +890,17 @@ namespace TbhDpsMeter
             if (live == null) return;
             double a = Sv(live, "attack"), asp = Sv(live, "aspd"), cr = Sv(live, "critrate"), cd = Sv(live, "critdmg"), cdr = Sv(live, "cdr");
             skKeys.TryGetValue(hero, out var ks); skLvl.TryGetValue(hero, out var ls);
-            cur[hero] = StreamBuilder.Build(hero, a, asp, cr, cd, cdr, ks, ls);
+            // 物理傷害% folds into per-hit damage (it never reached the sim before); units cancel in bSb/bCur so
+            // only the DELTA matters. AoE/範圍 scales how many monsters an AoE cast hits (was hardcoded to 2).
+            double curDmg = 1.0 + Sv(live, "Phys%");
+            double sbDmg = 1.0 + DispFP(Sv(live, "Phys%") * 100, "PhysicalDamagePercent", 10) / 100.0;
+            double curAoe = Sv(live, "AoE");
+            double aoeMult = curAoe > 1e-6 ? DispFP(curAoe, "AreaOfEffect", 1) / curAoe : 1.0;
+            cur[hero] = StreamBuilder.Build(hero, a, asp, cr, cd, cdr, ks, ls, 1.0);
             sb[hero] = StreamBuilder.Build(hero,
-                DispFP(a, "AttackDamage", 1), DispFP(asp, "AttackSpeed", 1),
+                DispFP(a, "AttackDamage", 1) * (sbDmg / (curDmg > 1e-6 ? curDmg : 1.0)), DispFP(asp, "AttackSpeed", 1),
                 DispFP(cr * 100, "CriticalChance", 10) / 100.0, DispFP(cd * 100, "CriticalDamage", 10) / 100.0,
-                DispFP(cdr * 100, "CooldownReduction", 10) / 100.0, ks, ls);
+                DispFP(cdr * 100, "CooldownReduction", 10) / 100.0, ks, ls, aoeMult);
         }
 
         // cheap change-hash over the sandbox streams, so RecomputeSim only runs when an edit changes something.
@@ -897,12 +915,12 @@ namespace TbhDpsMeter
         // floor (0.8s/wave spawn-gate + per-stage) + a DPS-bound battle, then scale only the battle by the sim.
         private void RecomputeSim(Dictionary<int, List<AtkStream>> cur, Dictionary<int, List<AtkStream>> sb)
         {
-            _simStage.Clear(); _simBase.Clear(); _simNew.Clear(); _simFloor.Clear();
+            _simStage.Clear(); _simBase.Clear(); _simNew.Clear(); _simFloor.Clear(); _simRatio.Clear(); _simCadence.Clear();
             foreach (var r in _clearStages)
             {
                 double measured = r.ActiveSeconds + r.IdleSeconds;
                 int wc = r.WaveDurations != null ? r.WaveDurations.Count : 0;
-                _simStage.Add(r.StageId); _simBase.Add(measured);
+                _simStage.Add(r.StageId); _simBase.Add(measured); _simRatio.Add(1.0); _simCadence.Add(false);
                 var curS = new List<AtkStream>(); var sbS = new List<AtkStream>();
                 if (r.Party != null) foreach (var snap in r.Party)
                 {
@@ -933,8 +951,16 @@ namespace TbhDpsMeter
                 double bCur = WaveSim.BattleTime(waves, st.Mpw, st.EffHp * k, curS, bossHp * k);
                 double bSb = WaveSim.BattleTime(waves, st.Mpw, st.EffHp * k, sbS, bossHp * k);
                 bool ok = bCur > 0.01 && !double.IsInfinity(bCur) && !double.IsNaN(bSb) && !double.IsInfinity(bSb);
-                double newClear = floorTotal + (ok ? battleMeasured * (bSb / bCur) : battleMeasured);
-                _simNew.Add(newClear); _simFloor.Add(floorTotal);
+                double ratio = ok ? bSb / bCur : 1.0;
+                double newClear = floorTotal + battleMeasured * ratio;
+                // cadence/overkill-bound: does MORE damage help here? Compare current battle to the cadence floor
+                // (one-shot everything). If within 5%, the party already one-shots ⇒ pure-damage edits do nothing;
+                // only attack-speed / CDR / AoE compress the cadence. Surface this so a +0% damage delta makes sense.
+                var curInf = new List<AtkStream>(curS.Count);
+                foreach (var s2 in curS) curInf.Add(new AtkStream(s2.PerHit * 1e9, s2.Interval, s2.Targets));
+                double bFloor = WaveSim.BattleTime(waves, st.Mpw, st.EffHp * k, curInf, bossHp * k);
+                bool cadence = ok && bFloor > 0 && bCur <= bFloor * 1.05;
+                _simNew.Add(newClear); _simFloor.Add(floorTotal); _simRatio[_simRatio.Count - 1] = ratio; _simCadence[_simCadence.Count - 1] = cadence;
             }
         }
 
@@ -971,17 +997,24 @@ namespace TbhDpsMeter
             // scale to the larger of base/predicted across rows so a worse-gear prediction can't overflow the bar
             for (int i = 0; i < _simBase.Count; i++) { if (_simBase[i] > maxBase) maxBase = _simBase[i]; if (_simNew[i] > maxBase) maxBase = _simNew[i]; }
             if (maxBase <= 0) maxBase = 1;
-            // each row = the cached iterative sim: BaseClear (measured) → NewClear (predicted), floor/battle split
+            // each row = the cached iterative sim: BaseClear (measured) → NewClear (predicted), floor/battle split.
+            // Click a row to drill into per-wave times. Amber stage = cadence-bound (one-shotting ⇒ +傷無效).
+            _clearRowRects.Clear();
             for (int i = 0; i < _simStage.Count; i++)
             {
                 double baseC = _simBase[i], newC = _simNew[i], floor = System.Math.Min(_simFloor[i], baseC);
                 double saved = baseC - newC, battle = System.Math.Max(0, newC - floor);
                 bool faster = saved > 0.05, slower = saved < -0.05;
+                bool cad = i < _simCadence.Count && _simCadence[i];
+                bool exp = i == _simExpand;
                 string nc = faster ? "#7fffa0" : (slower ? "#ff8a8a" : "#cdd5df");
-                GUI.Label(new Rect(ix, cy, 92, lh), $"<size=11>{StageLabel(_simStage[i])}</size>", _label);
+                string sl = cad ? "#d2a24a" : "#cdd5df";   // amber = cadence/overkill-bound
+                _clearRowRects.Add(new Rect(ix, cy, barX - ix - 2, lh));
+                GUI.Label(new Rect(ix, cy, 92, lh), $"<size=11><color=#6b7480>{(exp ? "▾" : "▸")}</color> <color={sl}>{StageLabel(_simStage[i])}</color></size>", _label);
                 GUI.Label(new Rect(ix + 94, cy, 104, lh), $"<size=11><color=#8a93a0>{baseC:0}s</color> → <color={nc}>{newC:0}s</color></size>", _label);
                 GUI.Label(new Rect(ix + 200, cy, 54, lh), $"<size=11><color={nc}>{(saved >= 0 ? "−" : "+")}{System.Math.Abs(saved):0.0}s</color></size>", _label);
-                GUI.Label(new Rect(ix + 258, cy, 156, lh), $"<size=11><color=#7d8aa0>地板{floor:0}</color> + <color={nc}>戰{battle:0}</color></size>", _label);
+                if (cad) GUI.Label(new Rect(ix + 258, cy, 156, lh), $"<size=11><color=#7d8aa0>地板{floor:0}</color> <color=#d2a24a>節奏限制</color></size>", _label);
+                else GUI.Label(new Rect(ix + 258, cy, 156, lh), $"<size=11><color=#7d8aa0>地板{floor:0}</color> + <color={nc}>戰{battle:0}</color></size>", _label);
                 float by = cy + lh * 0.5f - 3;
                 DrawRect(barX, by, (float)(barW * baseC / maxBase), 6, new Color(1, 1, 1, 0.10f));
                 float floorW = (float)(barW * floor / maxBase), newW = (float)(barW * newC / maxBase);
@@ -989,15 +1022,50 @@ namespace TbhDpsMeter
                 var col = faster ? new Color(0.50f, 1f, 0.63f, 0.85f) : (slower ? new Color(1f, 0.54f, 0.54f, 0.85f) : new Color(0.80f, 0.84f, 0.87f, 0.6f));
                 if (newW > floorW) DrawRect(barX + floorW, by, newW - floorW, 6, col);
                 cy += lh; totSaved += saved; totBase += baseC;
+                if (exp) cy = DrawPerWave(ix, cy, iw, lh, i);
             }
             if (totBase > 0)
             {
                 double pct = totSaved / totBase * 100;
                 string sc = totSaved > 0.05 ? "#7fffa0" : (totSaved < -0.05 ? "#ff8a8a" : "#cdd5df");
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "−" : "+")}{System.Math.Abs(pct):0.#}%</color>  <size=9><color=#6b7280>迭代模擬</color></size></size>", _label);
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "−" : "+")}{System.Math.Abs(pct):0.#}%</color>  <size=9><color=#6b7280>迭代模擬 · 點關卡看每波</color></size></size>", _label);
                 cy += lh;
             }
+            // formula / which-parameter-helps notes (answers "公式在哪 / 哪些有影響") — compact, always under the rows
+            int fl = (int)(lh * 0.72f);
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>每擊 = 攻擊 × 技能係數 × (1+物傷%) × 暴擊　|　間隔 = 自動 1/攻速 · 技能 max(0.1, CD×(1−冷縮))　|　AoE打擊數 = 2 × 範圍倍率</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>通關 = 地板(0.8/波 + 進場2.45 + 收尾4.25) ＋ 戰鬥(逐擊迭代,溢出浪費)。一刀斬後加傷無效 → 只剩攻速/冷縮/AoE</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#6b7280>影響: <color=#cdd5df>攻擊·暴擊·物傷%</color>(會溢出) · <color=#cdd5df>攻速·冷縮·範圍</color>(壓節奏,常有效)　無效: <color=#777e8a>移速·施法速度</color>(遊戲未使用)</color></size>", _label); cy += fl;
             return cy;
+        }
+
+        // per-wave drill-down for an expanded stage: each wave's REAL measured time (WaveDurations) → predicted,
+        // scaling only its battle part (above the 0.8s/wave spawn floor) by the stage's battle ratio bSb/bCur.
+        // No edit ⇒ ratio 1 ⇒ predicted == measured. A compact grid (cols by width). Returns the new cy.
+        private float DrawPerWave(float ix, float cy, float iw, float lh, int i)
+        {
+            var run = (i >= 0 && i < _clearStages.Count) ? _clearStages[i] : null;
+            var wd = run?.WaveDurations;
+            double ratio = i < _simRatio.Count ? _simRatio[i] : 1.0;
+            if (wd == null || wd.Count == 0)
+            {
+                GUI.Label(new Rect(ix + 14, cy, iw - 14, lh), "<size=9><color=#67707d>此關沒有每波紀錄</color></size>", _dim);
+                return cy + (int)(lh * 0.8f);
+            }
+            GUI.Label(new Rect(ix + 14, cy, iw - 14, lh), $"<size=9><color=#7d8aa0>每波 實測→預估（每波地板 0.8s 固定，僅壓縮戰鬥段 ×{ratio:0.00}）</color></size>", _dim);
+            cy += (int)(lh * 0.78f);
+            int cols = PerWaveCols(iw);
+            float cw = (iw - 14) / cols;
+            for (int w = 0; w < wd.Count; w++)
+            {
+                double dur = wd[w], bw = System.Math.Max(0, dur - 0.8), nw = 0.8 + bw * ratio;
+                string c2 = nw < dur - 0.03 ? "#7fffa0" : (nw > dur + 0.03 ? "#ff8a8a" : "#9aa3b0");
+                float wx = ix + 14 + (w % cols) * cw;
+                GUI.Label(new Rect(wx, cy, cw, lh), $"<size=9><color=#5f6873>W{w + 1}</color> <color=#8a93a0>{dur:0.0}</color><color={c2}>→{nw:0.0}</color></size>", _label);
+                if (w % cols == cols - 1) cy += (int)(lh * 0.8f);
+            }
+            if (wd.Count % cols != 0) cy += (int)(lh * 0.8f);
+            return cy + 2;
         }
 
         // friendly stage label, e.g. "2-1 TORMENT" → keep as-is (already short); fall back to the raw id
