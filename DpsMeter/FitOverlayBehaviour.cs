@@ -78,8 +78,7 @@ namespace TbhDpsMeter
         private readonly List<Rect> _sockRects = new List<Rect>();    // clickable socket cells (focused item)
         private readonly List<int> _sockPosList = new List<int>();    // parallel: socket position per cell
         private readonly List<Rect> _focusRects = new List<Rect>();   // clickable gear rows (set focus)
-        private int _picker = -1;       // slot whose item list is open (-1 = main view)
-        private bool _fitList;          // load-fitting side panel open
+        private bool _fitList;          // load-fitting side panel open (temporarily overrides the always-on picker)
         private Rect _saveRect, _loadRect;
         private readonly List<Rect> _fitLoadRects = new List<Rect>();   // per saved-fit "load" hitboxes
         private readonly List<Rect> _fitDelRects = new List<Rect>();    // per saved-fit "delete" hitboxes
@@ -88,8 +87,11 @@ namespace TbhDpsMeter
         private float _savedFlash;      // frame counter for the "已儲存" toast
         private int _pickerPage;
         private string _pickGrade = "";  // active grade-filter chip in the picker ("" = all)
+        private string _pickStat = "";   // active stat-filter chip in the picker ("" = all); item must carry this StatType
         private readonly List<Rect> _gradeRects = new List<Rect>();   // grade-chip hitboxes
         private readonly List<string> _gradeKeys = new List<string>();
+        private readonly List<Rect> _statRects = new List<Rect>();    // stat-filter chip hitboxes
+        private readonly List<string> _statKeys = new List<string>(); // parallel: stat enum name per chip
         // TBH's 10-tier rarity ladder (ascending) + short CJK labels, for the picker's grade chips.
         private static readonly string[] GradeLadder = { "COMMON", "UNCOMMON", "RARE", "LEGENDARY", "IMMORTAL", "ARCANA", "BEYOND", "CELESTIAL", "DIVINE", "COSMIC" };
         private static string GradeL(string g) => Loc.G("grade_" + g.ToLowerInvariant());
@@ -220,7 +222,6 @@ namespace TbhDpsMeter
             }
             catch { }
             if (_heroIdx >= _heroes.Count) _heroIdx = 0;
-            _picker = -1;
             _loaded = true;
         }
 
@@ -258,32 +259,38 @@ namespace TbhDpsMeter
             var g = (_load.TryGetValue(hero, out var a) && slot >= 0 && slot < a.Length) ? GearDatabase.ByKey(a[slot]) : null;
             return g != null ? g.GearGroup : "";
         }
+        // focus a gear slot: shows its sockets in the bench AND its items in the always-on picker.
+        // Changing slot clears the picker's grade/stat filters (a stale filter could hide the new list).
+        private void FocusSlot(int slot)
+        {
+            if (_focus != slot) { _pickGrade = ""; _pickStat = ""; _pickerPage = 0; }
+            _focus = slot; _sockSlot = -1; _fitList = false;
+        }
         // open the side-column material picker for a socket; its type (D/E/I) follows the position
         private void OpenSockPicker(int slot, int pos)
         {
             var cc = SlotSockets(CurHero, slot);
             _sockType = pos < cc[0] ? 'D' : (pos < cc[0] + cc[1] ? 'E' : 'I');
-            _sockSlot = slot; _sockPos = pos; _picker = -1; _fitList = false; _pickerPage = 0; _pickGrade = "";
+            _sockSlot = slot; _sockPos = pos; _fitList = false; _pickerPage = 0; _pickGrade = "";
         }
 
         private void HandlePointer()
         {
             if (GameUiState.MenuOpen()) { if (_dragging) { _dragging = false; InputCompat.ReleaseDrag(Slot); } return; }
             Vector2 m = UiScale.ToLocal(InputCompat.MouseGuiPos(), _rect.x, _rect.y, _scale);
-            if (!(_picker >= 0 || _sockSlot >= 0 || _fitList))   // width is owned by the side-column when it's open; don't resize then
             {
-                float rw = _rect.width, dh = 0f;
+                // resize the BASE panel width (the always-on picker keeps its fixed width on the right)
+                float rw = _rect.width - PickerW, dh = 0f;
                 var rr = _resize.Handle(Slot, m, ref rw, ref dh, 460f, Mathf.Max(460f, Screen.width * 0.95f), 0f, 0f, false);
-                _rect.width = rw;
-                if (rr == PanelResize.Result.Reset) { _rect.width = 560f; Plugin.FitPanelWidth.Value = _rect.width; return; }
-                if (rr == PanelResize.Result.Committed) { Plugin.FitPanelWidth.Value = _rect.width; return; }
-                if (rr != PanelResize.Result.None) return;
+                if (rr != PanelResize.Result.None) { Plugin.FitPanelWidth.Value = (rr == PanelResize.Result.Reset) ? 560f : rw; return; }
             }
             if (InputCompat.MousePressed())
             {
                 if (_closeRect.Contains(m)) { _visible = false; return; }
                 if (_saveRect.Contains(m)) { SaveCurrentFit(); return; }
-                if (_loadRect.Contains(m)) { _fitList = !_fitList; _picker = -1; _sockSlot = -1; return; }
+                if (_loadRect.Contains(m)) { _fitList = !_fitList; _sockSlot = -1; return; }
+                // side-column hits. The picker is the always-on default; the fit-list and socket-material
+                // pickers temporarily override it (their own back button restores the picker).
                 if (_fitList)
                 {
                     if (_backRect.Contains(m)) { _fitList = false; return; }
@@ -292,18 +299,7 @@ namespace TbhDpsMeter
                     for (int i = 0; i < _fitDelRects.Count && i < _fitIdx.Count; i++)
                         if (_fitDelRects[i].Contains(m)) { FitStore.RemoveAt(_fitIdx[i]); return; }
                 }
-                // side-column hits (picker stays open; the main view below is still live, so fall through)
-                if (_picker >= 0)
-                {
-                    if (_backRect.Contains(m)) { _picker = -1; return; }
-                    for (int i = 0; i < _gradeRects.Count && i < _gradeKeys.Count; i++)
-                        if (_gradeRects[i].Contains(m)) { _pickGrade = _gradeKeys[i]; _pickerPage = 0; return; }
-                    if (_ppPrev.Contains(m)) { _pickerPage = Mathf.Max(0, _pickerPage - 1); return; }
-                    if (_ppNext.Contains(m)) { _pickerPage++; return; }
-                    for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
-                        if (_pickRects[i].Contains(m)) { SetSlot(_picker, _pickKeys[i]); return; }   // keep list open after a swap
-                }
-                if (_sockSlot >= 0)
+                else if (_sockSlot >= 0)
                 {
                     if (_backRect.Contains(m)) { _sockSlot = -1; return; }
                     for (int i = 0; i < _gradeRects.Count && i < _gradeKeys.Count; i++)
@@ -313,13 +309,24 @@ namespace TbhDpsMeter
                     for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
                         if (_pickRects[i].Contains(m)) { SetSocket(_sockSlot, _sockPos, _pickKeys[i]); _sockSlot = -1; return; }
                 }
+                else   // always-on gear picker for the focused slot
+                {
+                    for (int i = 0; i < _gradeRects.Count && i < _gradeKeys.Count; i++)
+                        if (_gradeRects[i].Contains(m)) { _pickGrade = _gradeKeys[i]; _pickerPage = 0; return; }
+                    for (int i = 0; i < _statRects.Count && i < _statKeys.Count; i++)
+                        if (_statRects[i].Contains(m)) { _pickStat = _pickStat == _statKeys[i] ? "" : _statKeys[i]; _pickerPage = 0; return; }
+                    if (_ppPrev.Contains(m)) { _pickerPage = Mathf.Max(0, _pickerPage - 1); return; }
+                    if (_ppNext.Contains(m)) { _pickerPage++; return; }
+                    for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
+                        if (_pickRects[i].Contains(m)) { SetSlot(_focus, _pickKeys[i]); return; }   // keep list open after a swap
+                }
                 if (_resetRect.Contains(m)) { ResetLoadout(); return; }
                 for (int i = 0; i < _tabRects.Count; i++)
                     if (_tabRects[i].Contains(m)) { _heroIdx = i; return; }   // keep the side-column open across heroes
                 for (int i = 0; i < _swapRects.Count; i++)
-                    if (_swapRects[i].Contains(m)) { _picker = i; _focus = i; _sockSlot = -1; _fitList = false; _pickerPage = 0; _pickGrade = ""; return; }
+                    if (_swapRects[i].Contains(m)) { FocusSlot(i); return; }
                 for (int i = 0; i < _focusRects.Count; i++)
-                    if (_focusRects[i].Contains(m)) { _focus = i; _sockSlot = -1; return; }
+                    if (_focusRects[i].Contains(m)) { FocusSlot(i); return; }
                 for (int i = 0; i < _sockRects.Count && i < _sockPosList.Count; i++)
                     if (_sockRects[i].Contains(m)) { OpenSockPicker(_focus, _sockPosList[i]); return; }
                 if (_rect.Contains(m) && InputCompat.ClaimDrag(Slot)) { _dragging = true; _dragOffset = m - new Vector2(_rect.x, _rect.y); }
@@ -465,10 +472,10 @@ namespace TbhDpsMeter
             {
                 EnsureAssets(); if (!_placed) PlaceDefault(); if (!_loaded) Reload();
                 int fs = Fs; float lh = fs + 6;
-                // main column + optional item/material side-column to the RIGHT (expand, don't replace the page)
-                bool sideOpen = _picker >= 0 || _sockSlot >= 0 || _fitList;
+                // main column + always-on item/material side-column to the RIGHT (expand, don't replace the page)
+                const bool sideOpen = true;   // the gear picker is now persistent (sock/fit-list temporarily override it)
                 float baseW = Mathf.Max(560f, Plugin.FitPanelWidth.Value);
-                _rect.width = baseW + (sideOpen ? PickerW : 0f);
+                _rect.width = baseW + PickerW;
                 float x = _rect.x, ix = x + Pad, w = _rect.width, iw = baseW - Pad * 2;
 
                 // socket section height = focused item's header + one row per (non-empty type label + each socket)
@@ -602,7 +609,7 @@ namespace TbhDpsMeter
                         GUI.Label(new Rect(ix + iw - 56 - 152, cy, 152, lh), $"<size=11><color=#6b7682>← 原 </color><color=#9aa3b0>{Nm(oa[s])}</color></size>", _label);
                     }
                     GUI.Label(new Rect(ix + 48 + lh, cy, nameW, lh), $"<color=#{ghex}>{Nm(key)}</color>{slvl}", _label);
-                    bool open = _picker == s;
+                    bool open = _focus == s && _sockSlot < 0 && !_fitList;   // its items are the ones showing in the picker
                     var sr = new Rect(ix + iw - 52, cy + 1, 50, lh - 3);
                     GUI.Button(sr, open ? "▸ " + Loc.G("fit_swap") : Loc.G("fit_swap"), _btn); _swapRects.Add(sr);
                     if (open) DrawRect(ix - 2, cy, 2, lh, new Color(0.45f, 0.65f, 0.95f, 0.9f));   // marker: this slot's list is open
@@ -656,15 +663,15 @@ namespace TbhDpsMeter
                     }
                 }
 
-                // side column: the item / socket-material list expands to the RIGHT of the bench
-                if (sideOpen)
+                // side column (always on): the gear picker for the focused slot; the socket-material picker
+                // and the load-fitting list temporarily take its place.
                 {
                     float divX = x + baseW;
                     DrawRect(divX, _rect.y + Pad, 1, _rect.height - Pad * 2, new Color(1, 1, 1, 0.14f));
                     float pix = divX + 8, piw = PickerW - 16, pcy = _rect.y + Pad + lh;
-                    if (_picker >= 0) DrawPicker(pix, pcy, piw, lh, hero);
-                    else if (_sockSlot >= 0) DrawSockPicker(pix, pcy, piw, lh, fgg);
-                    else DrawFitList(pix, pcy, piw, lh, hero);
+                    if (_sockSlot >= 0) DrawSockPicker(pix, pcy, piw, lh, fgg);
+                    else if (_fitList) DrawFitList(pix, pcy, piw, lh, hero);
+                    else DrawPicker(pix, pcy, piw, lh, hero, _focus);
                 }
                 _resize.DrawGrip(_white, _rect);
             }
@@ -672,17 +679,16 @@ namespace TbhDpsMeter
             finally { GUI.matrix = prevM; }
         }
 
-        private void DrawPicker(float ix, float cy, float iw, float lh, int hero)
+        private void DrawPicker(float ix, float cy, float iw, float lh, int hero, int slot)
         {
-            _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ " + Loc.G("fit_back"), _btn);
-            GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{SlotL(_picker)} — {Loc.G("fit_pickgear")}</color>", _label);
+            GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{SlotL(slot)} — {Loc.G("fit_pickgear")}</color>", _label);
             cy += lh;
-            var list = GearDatabase.BySlot(SlotParts[_picker]);
+            var list = GearDatabase.BySlot(SlotParts[slot]);
             // weapon slots hold many gear TYPES (sword/bow/staff…); a class can only use its own type,
             // so restrict the list to the type the hero currently has equipped (e.g. ranger -> BOW only).
-            if (_picker == 0 || _picker == 1)
+            if (slot == 0 || slot == 1)
             {
-                int eq = (_orig.TryGetValue(hero, out var oa) && _picker < oa.Length) ? oa[_picker] : 0;
+                int eq = (_orig.TryGetValue(hero, out var oa) && slot < oa.Length) ? oa[slot] : 0;
                 var eg = GearDatabase.ByKey(eq);
                 if (eg != null && !string.IsNullOrEmpty(eg.Type))
                 {
@@ -709,20 +715,28 @@ namespace TbhDpsMeter
                 _gradeRects.Add(new Rect(chx, chy, cw, chh)); _gradeKeys.Add(GradeLadder[gi]); chx += cw + gap;
             }
             cy = chy + chh + 3;
+            // --- stat-filter chips: narrow to items that carry a chosen StatType (+傷害/+冷卻/+範圍/+攻速…) ---
+            DrawStatChips(ix, ref cy, iw, lh, list);
             if (_pickGrade != "")
             {
                 var fg = new List<GearTemplate>();
                 foreach (var g in list) if (g.Grade == _pickGrade) fg.Add(g);
                 list = fg;
             }
+            if (_pickStat != "")
+            {
+                var fs = new List<GearTemplate>();
+                foreach (var g in list) foreach (var st in g.Stats) if (st.Stat == _pickStat) { fs.Add(g); break; }
+                list = fs;
+            }
             int per = 4; float maxRowH = lh * 3.9f, iconSz = lh * 1.7f;
             int pages = Mathf.Max(1, (list.Count + per - 1) / per);
             _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
             int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
             _pickRects.Clear(); _pickKeys.Clear();
-            int curKey = (_load.TryGetValue(hero, out var arr) && _picker < arr.Length) ? arr[_picker] : 0;
+            int curKey = (_load.TryGetValue(hero, out var arr) && slot < arr.Length) ? arr[slot] : 0;
             // the variant the hero actually owns in this slot (each item ships as 2 inherent-roll variants).
-            int ownedKey = (_orig.TryGetValue(hero, out var oa2) && _picker < oa2.Length) ? oa2[_picker] : 0;
+            int ownedKey = (_orig.TryGetValue(hero, out var oa2) && slot < oa2.Length) ? oa2[slot] : 0;
             for (int i = 0; i < shown; i++)
             {
                 var g = list[start + i];
@@ -748,6 +762,42 @@ namespace TbhDpsMeter
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
             GUI.Button(_ppPrev, "◀", _btn); GUI.Button(_ppNext, "▶", _btn);
             GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<color=#9fb4cc>{_pickerPage + 1}/{pages}　{list.Count} {Loc.G("fit_count")}</color>", _dim);
+        }
+
+        // useful stats first; any others present in the list are appended after these
+        private static readonly string[] StatChipOrder =
+        {
+            "AttackDamage", "PhysicalDamagePercent", "AttackSpeed", "CastSpeed", "CriticalChance", "CriticalDamage",
+            "CooldownReduction", "AreaOfEffect", "MovementSpeed", "MaxHp", "Armor",
+        };
+
+        // stat-filter chips (single-select; click an active chip to clear). Derived from the stats actually
+        // present in the slot's items, so a hero only ever sees relevant filters.
+        private void DrawStatChips(float ix, ref float cy, float iw, float lh, List<GearTemplate> list)
+        {
+            _statRects.Clear(); _statKeys.Clear();
+            var present = new HashSet<string>();
+            foreach (var g in list) foreach (var st in g.Stats) present.Add(st.Stat);
+            if (present.Count == 0) return;
+            var ordered = new List<string>();
+            foreach (var s in StatChipOrder) if (present.Remove(s)) ordered.Add(s);
+            foreach (var s in present) ordered.Add(s);   // anything not in the priority list
+            float chx = ix, chy = cy, chh = lh - 1, gap = 3;
+            var on = new Color(0.26f, 0.55f, 0.46f, 0.55f); var off = new Color(1, 1, 1, 0.06f);
+            float aw = 40;
+            DrawRect(chx, chy, aw, chh, _pickStat == "" ? on : off);
+            GUI.Label(new Rect(chx + 5, chy, aw, chh), Loc.G("fit_all"), _dim);
+            _statRects.Add(new Rect(chx, chy, aw, chh)); _statKeys.Add(""); chx += aw + gap;
+            foreach (var s in ordered)
+            {
+                string lbl = StatL(s);
+                float cw = Mathf.Min(iw, _dim.CalcSize(new GUIContent(lbl)).x + 12);
+                if (chx + cw > ix + iw) { chx = ix; chy += chh + 2; }
+                DrawRect(chx, chy, cw, chh, _pickStat == s ? on : off);
+                GUI.Label(new Rect(chx + 5, chy, cw, chh), $"<size=11><color=#cbe3da>{lbl}</color></size>", _dim);
+                _statRects.Add(new Rect(chx, chy, cw, chh)); _statKeys.Add(s); chx += cw + gap;
+            }
+            cy = chy + chh + 3;
         }
 
         private void SaveCurrentFit()
