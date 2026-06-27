@@ -483,13 +483,14 @@ namespace TbhDpsMeter
                 double ratio = origDps > 0 ? sbDps / origDps : 1.0;
                 double shownDps = meas > 0 ? meas * ratio : sbDps;
 
+                // game 屬性-panel display scaling: % stats ×100, move speed ×100; attack/aspd as-is
                 GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("attack")}</color> <color=#eaf3ee>{Shown(Sv(live, "attack"), Sv(origAgg, "AttackDamage"), Sv(agg, "AttackDamage")):0}</color>   " +
                     $"<color=#9fb4cc>{Loc.G("aspd")}</color> <color=#eaf3ee>{Shown(Sv(live, "aspd"), Sv(origAgg, "AttackSpeed"), Sv(agg, "AttackSpeed")):0.##}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("critrate")}</color> <color=#eaf3ee>{Shown(Sv(live, "critrate"), Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance")):0.##}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("critdmg")}</color> <color=#eaf3ee>{Shown(Sv(live, "critdmg"), Sv(origAgg, "CriticalDamage"), Sv(agg, "CriticalDamage")):0.##}</color>", _dim); cy += lh;
+                    $"<color=#9fb4cc>{Loc.G("critrate")}</color> <color=#eaf3ee>{Shown(Sv(live, "critrate"), Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance")) * 100:0.#}%</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("critdmg")}</color> <color=#eaf3ee>{Shown(Sv(live, "critdmg"), Sv(origAgg, "CriticalDamage"), Sv(agg, "CriticalDamage")) * 100:0}%</color>", _dim); cy += lh;
                 GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("AoE")}</color> <color=#eaf3ee>{Shown(Sv(live, "AoE"), Sv(origAgg, "AreaOfEffect"), Sv(agg, "AreaOfEffect")):0.#}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("mspd")}</color> <color=#eaf3ee>{Shown(Sv(live, "mspd"), Sv(origAgg, "MovementSpeed"), Sv(agg, "MovementSpeed")):0}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("cdr")}</color> <color=#eaf3ee>{Shown(Sv(live, "cdr"), Sv(origAgg, "CooldownReduction"), Sv(agg, "CooldownReduction")):0.#}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("mspd")}</color> <color=#eaf3ee>{Shown(Sv(live, "mspd"), Sv(origAgg, "MovementSpeed"), Sv(agg, "MovementSpeed")) * 100:0}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("cdr")}</color> <color=#eaf3ee>{Shown(Sv(live, "cdr"), Sv(origAgg, "CooldownReduction"), Sv(agg, "CooldownReduction")) * 100:0.#}%</color>   " +
                     $"<color=#9fb4cc>{Loc.G("Multistrike")}</color> <color=#eaf3ee>{Shown(Sv(live, "Multistrike"), Sv(origAgg, "Multistrike"), Sv(agg, "Multistrike")):0.#}</color>   " +
                     $"<color=#9fb4cc>{Loc.G("ProjCount")}</color> <color=#eaf3ee>{Shown(Sv(live, "ProjCount"), Sv(origAgg, "ProjectileCount"), Sv(agg, "ProjectileCount")):0.#}</color>", _dim); cy += lh;
                 string rc = ratio > 1.001 ? "#7fffa0" : (ratio < 0.999 ? "#ff8a8a" : "#cdd5df");
@@ -707,7 +708,9 @@ namespace TbhDpsMeter
                 else { var pc = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconR, _white); GUI.color = pc; }
                 float tx = ix + iconSz + 8, tw = iw - iconSz - 12;
                 GUI.Label(new Rect(tx, cy + 2, tw, lh), $"<color=#eaf3ee>{StatL(e.Stat)} {StatVal(e.Stat, e.Mod, e.Value)}</color> <size=10><color=#8a93a0>T{mm.TierFor(gearGroup)}</color></size>", _label);
-                GUI.Label(new Rect(tx, cy + lh, tw, lh), $"<color=#9aa3b0>{Nm(mm.Key)}</color>", _dim);
+                // inscription options aren't named items — label them by socket type instead of "#key"
+                string sub = _sockType == 'I' ? Loc.G("sock_inscribe") : Nm(mm.Key);
+                GUI.Label(new Rect(tx, cy + lh, tw, lh), $"<color=#9aa3b0>{sub}</color>", _dim);
                 _pickRects.Add(r); _pickKeys.Add(mm.Key); cy += rowH;
             }
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
