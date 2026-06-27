@@ -48,7 +48,9 @@ namespace TbhDpsMeter
         public readonly List<Affix> Affixes = new List<Affix>();
         /// <summary>Contents of the 裝飾/雕刻/銘文 sockets, each as a stat+value (live path; usually empty).</summary>
         public readonly List<Affix> Sockets = new List<Affix>();
-        /// <summary>Applied socket counts from the save (裝飾 / 雕刻 / 銘文). Scored per applied socket.</summary>
+        /// <summary>Applied socket TALLIES from the save (裝飾 / 雕刻 / 銘文 *AppliedTotalCount). These are
+        /// operation counts, NOT slot-fill counts, so they over-count sockets — for a real socket total use
+        /// Affixes.Count (filled) or SocketDb.Counts(grade) (max). Kept here only as the raw save shape.</summary>
         public int DecoCount, EngraveCount, InscribeCount;
         /// <summary>Item icon (a UnityEngine.Texture at runtime; typed object so the Unity-free
         /// TrackerTests build can compile RunModels). null when unavailable -> panel shows a glyph.</summary>

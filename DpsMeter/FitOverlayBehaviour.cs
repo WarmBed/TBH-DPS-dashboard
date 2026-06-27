@@ -896,7 +896,8 @@ namespace TbhDpsMeter
                 AttackSpeed = DispFP(oAsp, "AttackSpeed", 1),
                 CritChance = DispFP(oCrR * 100, "CriticalChance", 10) / 100.0,
                 CritDamage = DispFP(oCrD * 100, "CriticalDamage", 10) / 100.0,
-                DamageMult = 1.0 + DispFP(oPh * 100, "PhysicalDamagePercent", 10) / 100.0,
+                // Phys% only amplifies physical damage; a caster (live 物傷% ~0) gains nothing from it
+                DamageMult = oPh > 0.01 ? 1.0 + DispFP(oPh * 100, "PhysicalDamagePercent", 10) / 100.0 : 1.0 + oPh,
             };
             double od = DamageFormula.ExpectedDps(oc);
             return od > 0 ? DamageFormula.ExpectedDps(nc) / od : 1.0;
@@ -911,10 +912,13 @@ namespace TbhDpsMeter
             if (live == null) return;
             double a = Sv(live, "attack"), asp = Sv(live, "aspd"), cr = Sv(live, "critrate"), cd = Sv(live, "critdmg"), cdr = Sv(live, "cdr");
             skKeys.TryGetValue(hero, out var ks); skLvl.TryGetValue(hero, out var ls);
-            // 物理傷害% folds into per-hit damage (it never reached the sim before); units cancel in bSb/bCur so
-            // only the DELTA matters. AoE/範圍 scales how many monsters an AoE cast hits (was hardcoded to 2).
-            double curDmg = 1.0 + Sv(live, "Phys%");
-            double sbDmg = 1.0 + DispFP(Sv(live, "Phys%") * 100, "PhysicalDamagePercent", 10) / 100.0;
+            // 物理傷害% folds into per-hit damage; units cancel in bSb/bCur so only the DELTA matters. But Phys%
+            // ONLY amplifies PHYSICAL damage — a hero with ~0 live 物傷% deals elemental damage (e.g. the mage),
+            // so Phys% does nothing for them (don't let the optimizer put 物理傷害 on a caster). AoE/範圍 scales
+            // how many monsters an AoE cast hits (was hardcoded to 2).
+            double curPh = Sv(live, "Phys%");
+            double curDmg = 1.0 + curPh;
+            double sbDmg = curPh > 0.01 ? 1.0 + DispFP(curPh * 100, "PhysicalDamagePercent", 10) / 100.0 : curDmg;
             double curAoe = Sv(live, "AoE");
             double aoeMult = curAoe > 1e-6 ? DispFP(curAoe, "AreaOfEffect", 1) / curAoe : 1.0;
             cur[hero] = StreamBuilder.Build(hero, a, asp, cr, cd, cdr, ks, ls, 1.0);
