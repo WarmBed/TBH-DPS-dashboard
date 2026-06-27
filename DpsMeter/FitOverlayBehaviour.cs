@@ -332,7 +332,7 @@ namespace TbhDpsMeter
                 }
                 if (_resetRect.Contains(m)) { ResetLoadout(); return; }
                 for (int i = 0; i < _tabRects.Count; i++)
-                    if (_tabRects[i].Contains(m)) { _heroIdx = i; return; }   // keep the side-column open across heroes
+                    if (_tabRects[i].Contains(m)) { _heroIdx = i; _pickFirst = 0; return; }   // expand this hero (keep the picker open)
                 for (int i = 0; i < _swapRects.Count; i++)
                     if (_swapRects[i].Contains(m)) { FocusSlot(i); return; }
                 for (int i = 0; i < _focusRects.Count; i++)
@@ -506,7 +506,7 @@ namespace TbhDpsMeter
                 int typesShown = (sc0[0] > 0 ? 1 : 0) + (sc0[1] > 0 ? 1 : 0) + (sc0[2] > 0 ? 1 : 0);
                 int sockRows = Mathf.Max(2, 1 + typesShown + sc0[0] + sc0[1] + sc0[2]);
                 int clearRows = (_clearStages.Count > 0 ? _clearStages.Count + 2 : 2);   // title + per-stage + average (or "no data")
-                int mainRows = 10 + clearRows + 1 + SlotParts.Length + 1 + sockRows;   // DPS + 8 stats + clear-time + gear + sockets
+                int mainRows = clearRows + _heroes.Count + 9 + SlotParts.Length + 1 + sockRows;   // clear-time + hero headers + (expanded: 8 stats + gear + sockets)
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
@@ -534,23 +534,7 @@ namespace TbhDpsMeter
 
                 int hero = CurHero;
 
-                // hero tabs
-                _tabRects.Clear(); float tx = ix;
-                for (int i = 0; i < _heroes.Count; i++)
-                {
-                    bool inParty = _partyHeroes.Contains(_heroes[i]);   // ★ marks the current party (recent-run participants)
-                    string nm = HeroProbe.HeroName(_heroes[i]);
-                    float tw = _btn.CalcSize(new GUIContent((inParty ? "★" : "") + nm)).x + 16;
-                    var tr = new Rect(tx, cy, tw, lh - 2); bool sel = i == _heroIdx;
-                    DrawRect(tr.x, tr.y, tr.width, tr.height, sel ? new Color(0.30f, 0.45f, 0.75f, 0.4f) : new Color(1, 1, 1, 0.05f));
-                    DrawRect(tr.x, tr.y + tr.height - 2, tr.width, 2, ClassColor(_heroes[i]));
-                    string star = inParty ? "<color=#ffd86b>★</color>" : "";
-                    GUI.Label(new Rect(tx + 8, cy, tw, lh), sel ? $"{star}<b>{nm}</b>" : $"{star}<color=#9aa3b0>{nm}</color>", _label);
-                    _tabRects.Add(tr); tx += tw + 4;
-                }
-                cy += lh + 2;
-
-                // computed stats (sandbox gear + effective sockets) + anchored DPS.
+                // computed stats (sandbox gear + effective sockets) for the EXPANDED hero.
                 // baseline (orig) = real items + their REAL applied sockets; sandbox = edited cells, else real.
                 _load.TryGetValue(hero, out var gearArr);
                 _orig.TryGetValue(hero, out var origArr);
@@ -585,116 +569,33 @@ namespace TbhDpsMeter
                 double sbDps = FitCalc.LoadoutDpsWith(gearArr, sbLines);
                 double origDps = FitCalc.LoadoutDpsWith(origArr, origLines);
                 _liveStats.TryGetValue(hero, out var live);   // real character stats (anchor)
-                double meas; _measDps.TryGetValue(hero, out meas);
                 double ratio = origDps > 0 ? sbDps / origDps : 1.0;
-                double shownDps = meas > 0 ? meas * ratio : sbDps;
 
-                // DPS (prominent) + a before→after comparison list with rightward difference bars.
-                // O = the real current value (anchor); N = the value after the sandbox edits.
-                string rc = ratio > 1.001 ? "#7fffa0" : (ratio < 0.999 ? "#ff8a8a" : "#cdd5df");
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_dps")}</color> <color=#eaf3ee><b>{FmtNum(shownDps)}</b></color>  " +
-                    $"<color={rc}>(×{ratio:0.000} {Loc.G("fit_vs")})</color>   <size=10><color=#8a93a0>{Loc.G("fit_approx")}</color></size>", _label); cy += lh;
-                // table header: 原 / 新 / 差異
-                GUI.Label(new Rect(ix + 66, cy, 60, lh), $"<size=10><color=#6b7280>{Loc.G("fit_orig")}</color></size>", _dim);
-                GUI.Label(new Rect(ix + 128, cy, 60, lh), $"<size=10><color=#6b7280>{Loc.G("fit_new")}</color></size>", _dim);
-                GUI.Label(new Rect(ix + 190, cy, 46, lh), $"<size=10><color=#6b7280>{Loc.G("fit_diff")}</color></size>", _dim);
-                cy += lh * 0.72f;
-                double oAtk = Sv(live, "attack"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("attack"), oAtk, DispFP(oAtk, "AttackDamage", 1), "0", "");
-                double oAsp = Sv(live, "aspd"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("aspd"), oAsp, DispFP(oAsp, "AttackSpeed", 1), "0.##", "");
-                double oCr = Sv(live, "critrate") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critrate"), oCr, DispFP(oCr, "CriticalChance", 10), "0.#", "%");
-                double oCd = Sv(live, "critdmg") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critdmg"), oCd, DispFP(oCd, "CriticalDamage", 10), "0", "%");
-                double oPh = Sv(live, "Phys%") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("PhysicalDamagePercent"), oPh, DispFP(oPh, "PhysicalDamagePercent", 10), "0.#", "%");
-                double oAoe = Sv(live, "AoE"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("AoE"), oAoe, DispFP(oAoe, "AreaOfEffect", 1), "0.#", "");
-                double oMs = Sv(live, "mspd") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("mspd"), oMs, DispFP(oMs, "MovementSpeed", 1), "0", "");
-                double oCdr = Sv(live, "cdr") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("cdr"), oCdr, DispFP(oCdr, "CooldownReduction", 10), "0.#", "%");
-                DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
-
-                // live clear-time prediction: party-DPS factor combines EVERY party member's edits (Σ share×ratio);
-                // idle time scales with the focused hero's move-speed change (same display path as the 移速 row)
+                // per-hero DPS ratios → party clear-time at the TOP (combines every member's edits)
+                var ratioByHero = new Dictionary<int, double>();
+                foreach (var hh in _heroes) ratioByHero[hh] = (hh == hero) ? ratio : HeroRatio(hh);
                 double mspdLive = Sv(live, "mspd") * 100;
                 double speedMult = mspdLive > 0.0001 ? DispFP(mspdLive, "MovementSpeed", 1) / mspdLive : 1.0;
-                var ratioByHero = new Dictionary<int, double>();
-                foreach (var h in _heroes) ratioByHero[h] = (h == hero) ? ratio : HeroRatio(h);
                 cy = DrawClearRows(ix, cy, iw, lh, hero, ratioByHero, speedMult);
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
-                // gear slots (click a row to view its sockets below; 換 swaps the item)
-                _swapRects.Clear(); _focusRects.Clear();
-                _load.TryGetValue(hero, out var arr);
-                for (int s = 0; s < SlotParts.Length; s++)
+                // ===== hero accordion: each hero = a header (name + DPS×ratio); the selected one expands for editing =====
+                _tabRects.Clear();
+                for (int i = 0; i < _heroes.Count; i++)
                 {
-                    int key = (arr != null && s < arr.Length) ? arr[s] : 0;
-                    bool changed = _orig.TryGetValue(hero, out var oa) && oa != null && s < oa.Length && oa[s] != key;
-                    if (_focus == s) DrawRect(ix, cy, iw, lh, new Color(0.85f, 0.70f, 0.30f, 0.14f));
-                    else if ((s & 1) == 1) DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
-                    _focusRects.Add(new Rect(ix, cy, iw - 56, lh));
-                    GUI.Label(new Rect(ix, cy, 44, lh), $"<color=#9aa3b0>{SlotL(s)}</color>", _label);
-                    var stex = GearIconCache.Get(key);
-                    if (stex != null) GUI.DrawTexture(new Rect(ix + 46, cy + 1, lh - 2, lh - 2), stex, ScaleMode.ScaleToFit);
-                    var gt = GearDatabase.ByKey(key);
-                    string ghex = changed ? "7fffa0" : GradeHex(gt != null ? gt.Grade : "");
-                    string slvl = (gt != null && gt.Level > 0) ? $" <size=10><color=#8a93a0>Lv{gt.Level}</color></size>" : "";
-                    float nameW = iw - 48 - lh - 56;
-                    if (changed)
-                    {
-                        // a swapped slot shows the ORIGINAL on the right so old vs new are visible together
-                        nameW -= 156;
-                        GUI.Label(new Rect(ix + iw - 56 - 152, cy, 152, lh), $"<size=11><color=#6b7682>← 原 </color><color=#9aa3b0>{Nm(oa[s])}</color></size>", _label);
-                    }
-                    GUI.Label(new Rect(ix + 48 + lh, cy, nameW, lh), $"<color=#{ghex}>{Nm(key)}</color>{slvl}", _label);
-                    bool open = _focus == s && _sockSlot < 0 && !_fitList;   // its items are the ones showing in the picker
-                    var sr = new Rect(ix + iw - 52, cy + 1, 50, lh - 3);
-                    GUI.Button(sr, open ? "▸ " + Loc.G("fit_swap") : Loc.G("fit_swap"), _btn); _swapRects.Add(sr);
-                    if (open) DrawRect(ix - 2, cy, 2, lh, new Color(0.45f, 0.65f, 0.95f, 0.9f));   // marker: this slot's list is open
-                    cy += lh;
+                    int h = _heroes[i]; bool expanded = i == _heroIdx;
+                    double rH = ratioByHero.TryGetValue(h, out var rv) ? rv : 1.0;
+                    double dpsH = (_measDps.TryGetValue(h, out var mh) && mh > 0) ? mh * rH : 0;
+                    string rcH = rH > 1.001 ? "#7fffa0" : (rH < 0.999 ? "#ff8a8a" : "#9aa3b0");
+                    string starH = _partyHeroes.Contains(h) ? "<color=#ffd86b>★</color>" : "";
+                    DrawRect(ix, cy, iw, lh, expanded ? new Color(0.30f, 0.45f, 0.75f, 0.28f) : new Color(1, 1, 1, 0.04f));
+                    DrawRect(ix, cy, 3, lh, ClassColor(h));
+                    GUI.Label(new Rect(ix + 8, cy, iw - 10, lh), $"<color=#7f8a99>{(expanded ? "▾" : "▸")}</color> {starH}<b><color=#dfe7f0>{HeroProbe.HeroName(h)}</color></b>   <color=#9fb4cc>{Loc.G("fit_dps")}</color> <b>{FmtNum(dpsH)}</b> <color={rcH}>×{rH:0.00}</color>", _label);
+                    _tabRects.Add(new Rect(ix, cy, iw, lh)); cy += lh;
+                    if (expanded) DrawHeroDetail(ix, ref cy, iw, lh, hero, gearArr, origArr, hsock, live);
                 }
 
-                // ---- sockets of the focused item (裝飾槽 / 雕刻槽 / 銘文槽); their effects fold into the stats above ----
-                DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
-                int fkey = (arr != null && _focus < arr.Length) ? arr[_focus] : 0;
-                string fgg = SlotGroup(hero, _focus);
-                int[] cc = SlotSockets(hero, _focus);
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_sockets")}</color>  <color=#cdd5df>{SlotL(_focus)} · {Nm(fkey)}</color>", _dim); cy += lh;
-                _sockRects.Clear(); _sockPosList.Clear();
-                if (cc[0] + cc[1] + cc[2] == 0)
-                {
-                    GUI.Label(new Rect(ix + 12, cy, iw - 12, lh), $"<size=11><color=#67707d>{Loc.G("sock_none")}</color></size>", _label); cy += lh;
-                }
-                else
-                {
-                    // effective effect per cell: edited material wins, else the item's REAL applied effect
-                    bool fUnchanged = origArr != null && gearArr != null && _focus < origArr.Length && _focus < gearArr.Length && origArr[_focus] == gearArr[_focus];
-                    var fReal = RealSockets.Get(hero, _focus);
-                    int[] fEdited = (hsock != null && hsock.TryGetValue(_focus, out var fea)) ? fea : null;
-                    string[] tk = { "sock_deco", "sock_engrave", "sock_inscribe" };
-                    char[] tc = { 'D', 'E', 'I' };
-                    int pos = 0;
-                    for (int ti = 0; ti < 3; ti++)
-                    {
-                        if (cc[ti] == 0) continue;
-                        GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9aa3b0>{Loc.G(tk[ti])} ×{cc[ti]}</color>", _dim); cy += lh;
-                        for (int j = 0; j < cc[ti]; j++)
-                        {
-                            var eff = FitCalc.EffectiveCell(fReal, fEdited, pos, fgg, fUnchanged);
-                            bool filled = !string.IsNullOrEmpty(eff.Stat);
-                            var cell = new Rect(ix + 12, cy, iw - 12, lh - 1);
-                            DrawRect(cell.x, cell.y, cell.width, cell.height, filled ? new Color(0.25f, 0.42f, 0.40f, 0.22f) : new Color(1, 1, 1, 0.04f));
-                            if (filled)
-                            {
-                                // material key: edited cell knows it; a real cell borrows a matching material's icon
-                                int mk = (fEdited != null && pos < fEdited.Length && fEdited[pos] > 0) ? fEdited[pos] : MatCatalog.FindByEffect(tc[ti], fgg, eff.Stat, eff.Mod);
-                                var tex = (mk > 0 && tc[ti] != 'I') ? GearIconCache.Get(mk) : null;   // inscriptions have no item icon
-                                var ir = new Rect(ix + 15, cy + 1, lh - 3, lh - 3);
-                                if (tex != null) GUI.DrawTexture(ir, tex, ScaleMode.ScaleToFit);
-                                else GUI.Label(ir, "<color=#7fd0c2>◆</color>", _label);   // glyph instead of a broken square
-                                GUI.Label(new Rect(ix + 16 + lh, cy, iw - 22 - lh, lh), $"<size=11><color=#bcd0ea>{StatL(eff.Stat)} {StatVal(eff.Stat, eff.Mod, eff.Value)}</color></size>", _label);
-                            }
-                            else GUI.Label(new Rect(ix + 18, cy, iw - 24, lh), $"<size=11>◇ <color=#67707d>{Loc.G("sock_empty")}</color></size>", _label);
-                            _sockRects.Add(cell); _sockPosList.Add(pos);
-                            pos++; cy += lh;
-                        }
-                    }
-                }
+                string fgg = SlotGroup(hero, _focus);   // gear group of the focused slot (for the socket-material picker)
 
                 // side column (always on): the gear picker for the focused slot; the socket-material picker
                 // and the load-fitting list temporarily take its place.
@@ -955,6 +856,99 @@ namespace TbhDpsMeter
 
         // friendly stage label, e.g. "2-1 TORMENT" → keep as-is (already short); fall back to the raw id
         private static string StageLabel(string stageId) => string.IsNullOrEmpty(stageId) ? "?" : stageId;
+
+        // the expanded hero's full detail under its accordion header: before→after stat comparison + the 10 gear
+        // slots + the focused slot's sockets. The caller has already set the _fp* fields for this hero.
+        private void DrawHeroDetail(float ix, ref float cy, float iw, float lh, int hero, int[] gearArr, int[] origArr, Dictionary<int, int[]> hsock, Dictionary<string, double> live)
+        {
+            GUI.Label(new Rect(ix + 66, cy, 60, lh), $"<size=10><color=#6b7280>{Loc.G("fit_orig")}</color></size>", _dim);
+            GUI.Label(new Rect(ix + 128, cy, 60, lh), $"<size=10><color=#6b7280>{Loc.G("fit_new")}</color></size>", _dim);
+            GUI.Label(new Rect(ix + 190, cy, 46, lh), $"<size=10><color=#6b7280>{Loc.G("fit_diff")}</color></size>", _dim);
+            cy += lh * 0.72f;
+            double oAtk = Sv(live, "attack"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("attack"), oAtk, DispFP(oAtk, "AttackDamage", 1), "0", "");
+            double oAsp = Sv(live, "aspd"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("aspd"), oAsp, DispFP(oAsp, "AttackSpeed", 1), "0.##", "");
+            double oCr = Sv(live, "critrate") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critrate"), oCr, DispFP(oCr, "CriticalChance", 10), "0.#", "%");
+            double oCd = Sv(live, "critdmg") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critdmg"), oCd, DispFP(oCd, "CriticalDamage", 10), "0", "%");
+            double oPh = Sv(live, "Phys%") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("PhysicalDamagePercent"), oPh, DispFP(oPh, "PhysicalDamagePercent", 10), "0.#", "%");
+            double oAoe = Sv(live, "AoE"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("AoE"), oAoe, DispFP(oAoe, "AreaOfEffect", 1), "0.#", "");
+            double oMs = Sv(live, "mspd") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("mspd"), oMs, DispFP(oMs, "MovementSpeed", 1), "0", "");
+            double oCdr = Sv(live, "cdr") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("cdr"), oCdr, DispFP(oCdr, "CooldownReduction", 10), "0.#", "%");
+            DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
+
+            // gear slots (click a row to focus it; 換 opens the picker for that slot)
+            _swapRects.Clear(); _focusRects.Clear();
+            for (int s = 0; s < SlotParts.Length; s++)
+            {
+                int key = (gearArr != null && s < gearArr.Length) ? gearArr[s] : 0;
+                bool changed = origArr != null && s < origArr.Length && origArr[s] != key;
+                if (_focus == s) DrawRect(ix, cy, iw, lh, new Color(0.85f, 0.70f, 0.30f, 0.14f));
+                else if ((s & 1) == 1) DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
+                _focusRects.Add(new Rect(ix, cy, iw - 56, lh));
+                GUI.Label(new Rect(ix, cy, 44, lh), $"<color=#9aa3b0>{SlotL(s)}</color>", _label);
+                var stex = GearIconCache.Get(key);
+                if (stex != null) GUI.DrawTexture(new Rect(ix + 46, cy + 1, lh - 2, lh - 2), stex, ScaleMode.ScaleToFit);
+                var gt = GearDatabase.ByKey(key);
+                string ghex = changed ? "7fffa0" : GradeHex(gt != null ? gt.Grade : "");
+                string slvl = (gt != null && gt.Level > 0) ? $" <size=10><color=#8a93a0>Lv{gt.Level}</color></size>" : "";
+                float nameW = iw - 48 - lh - 56;
+                if (changed)
+                {
+                    nameW -= 156;
+                    GUI.Label(new Rect(ix + iw - 56 - 152, cy, 152, lh), $"<size=11><color=#6b7682>← 原 </color><color=#9aa3b0>{Nm(origArr[s])}</color></size>", _label);
+                }
+                GUI.Label(new Rect(ix + 48 + lh, cy, nameW, lh), $"<color=#{ghex}>{Nm(key)}</color>{slvl}", _label);
+                bool open = _focus == s && _sockSlot < 0 && !_fitList;
+                var sr = new Rect(ix + iw - 52, cy + 1, 50, lh - 3);
+                GUI.Button(sr, open ? "▸ " + Loc.G("fit_swap") : Loc.G("fit_swap"), _btn); _swapRects.Add(sr);
+                if (open) DrawRect(ix - 2, cy, 2, lh, new Color(0.45f, 0.65f, 0.95f, 0.9f));
+                cy += lh;
+            }
+
+            // ---- sockets of the focused item (their effects fold into the stats above) ----
+            DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
+            int fkey = (gearArr != null && _focus < gearArr.Length) ? gearArr[_focus] : 0;
+            string fgg = SlotGroup(hero, _focus);
+            int[] cc = SlotSockets(hero, _focus);
+            GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_sockets")}</color>  <color=#cdd5df>{SlotL(_focus)} · {Nm(fkey)}</color>", _dim); cy += lh;
+            _sockRects.Clear(); _sockPosList.Clear();
+            if (cc[0] + cc[1] + cc[2] == 0)
+            {
+                GUI.Label(new Rect(ix + 12, cy, iw - 12, lh), $"<size=11><color=#67707d>{Loc.G("sock_none")}</color></size>", _label); cy += lh;
+            }
+            else
+            {
+                bool fUnchanged = origArr != null && gearArr != null && _focus < origArr.Length && _focus < gearArr.Length && origArr[_focus] == gearArr[_focus];
+                var fReal = RealSockets.Get(hero, _focus);
+                int[] fEdited = (hsock != null && hsock.TryGetValue(_focus, out var fea)) ? fea : null;
+                string[] tk = { "sock_deco", "sock_engrave", "sock_inscribe" };
+                char[] tc = { 'D', 'E', 'I' };
+                int pos = 0;
+                for (int ti = 0; ti < 3; ti++)
+                {
+                    if (cc[ti] == 0) continue;
+                    GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9aa3b0>{Loc.G(tk[ti])} ×{cc[ti]}</color>", _dim); cy += lh;
+                    for (int j = 0; j < cc[ti]; j++)
+                    {
+                        var eff = FitCalc.EffectiveCell(fReal, fEdited, pos, fgg, fUnchanged);
+                        bool filled = !string.IsNullOrEmpty(eff.Stat);
+                        var cell = new Rect(ix + 12, cy, iw - 12, lh - 1);
+                        DrawRect(cell.x, cell.y, cell.width, cell.height, filled ? new Color(0.25f, 0.42f, 0.40f, 0.22f) : new Color(1, 1, 1, 0.04f));
+                        if (filled)
+                        {
+                            int mk = (fEdited != null && pos < fEdited.Length && fEdited[pos] > 0) ? fEdited[pos] : MatCatalog.FindByEffect(tc[ti], fgg, eff.Stat, eff.Mod);
+                            var tex = (mk > 0 && tc[ti] != 'I') ? GearIconCache.Get(mk) : null;
+                            var ir = new Rect(ix + 15, cy + 1, lh - 3, lh - 3);
+                            if (tex != null) GUI.DrawTexture(ir, tex, ScaleMode.ScaleToFit);
+                            else GUI.Label(ir, "<color=#7fd0c2>◆</color>", _label);
+                            GUI.Label(new Rect(ix + 16 + lh, cy, iw - 22 - lh, lh), $"<size=11><color=#bcd0ea>{StatL(eff.Stat)} {StatVal(eff.Stat, eff.Mod, eff.Value)}</color></size>", _label);
+                        }
+                        else GUI.Label(new Rect(ix + 18, cy, iw - 24, lh), $"<size=11>◇ <color=#67707d>{Loc.G("sock_empty")}</color></size>", _label);
+                        _sockRects.Add(cell); _sockPosList.Add(pos);
+                        pos++; cy += lh;
+                    }
+                }
+            }
+        }
 
         private void DrawFitList(float ix, float cy, float iw, float lh, int hero)
         {
