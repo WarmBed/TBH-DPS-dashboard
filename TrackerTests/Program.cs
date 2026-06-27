@@ -691,6 +691,29 @@ class Tests
         // --- SimulateFallback: an uncleared stage uses an average active-fraction ---
         var fb = ClearTimeSim.SimulateFallback(100, 0.6, 2.0, 1.0);   // 100*(0.6/2 + 0.4/1) = 70
         Check("[sim] fallback mixed = 70", Near(fb.NewClear, 70), fb.NewClear);
+
+        // ===== WaveSim: the iterative kill-by-kill simulator (overkill / cadence / AoE) =====
+        Console.WriteLine("-- WaveSim --");
+        var oneStream = new System.Collections.Generic.List<AtkStream> { new AtkStream(10, 1, 1) };
+        Check("[wave] 100hp /10perHit /1s = 10 hits = 10s", Near(WaveSim.WaveTime(100, 1, oneStream), 10), WaveSim.WaveTime(100, 1, oneStream));
+        // OVERKILL: 200 per hit one-shots 100hp in ONE cast — NOT 0.5s. More damage past one-shot is wasted.
+        var bigHit = new System.Collections.Generic.List<AtkStream> { new AtkStream(200, 1, 1) };
+        Check("[wave] overkill one-shot = 1 cast = 1s (not 0.5)", Near(WaveSim.WaveTime(100, 1, bigHit), 1), WaveSim.WaveTime(100, 1, bigHit));
+        Check("[wave] overkill ×10 still 1 cast", Near(WaveSim.WaveTime(100, 1, new System.Collections.Generic.List<AtkStream> { new AtkStream(2000, 1, 1) }), 1), 1);
+        // CADENCE FLOOR: 5 one-shot monsters, single-target = 5 casts = 5s — DPS past one-shot can't beat it.
+        Check("[wave] 5 one-shot monsters single-target = 5s", Near(WaveSim.WaveTime(100, 5, bigHit), 5), WaveSim.WaveTime(100, 5, bigHit));
+        // AoE clears the cadence floor: same 5 monsters, Targets=5 = 1 cast = 1s.
+        var aoe = new System.Collections.Generic.List<AtkStream> { new AtkStream(200, 1, 5) };
+        Check("[wave] 5 one-shot AoE(T5) = 1 cast = 1s", Near(WaveSim.WaveTime(100, 5, aoe), 1), WaveSim.WaveTime(100, 5, aoe));
+        // 5 tanky monsters, single-target: 50 hits @1/s = 50s (DPS-bound, scales with DPS)
+        Check("[wave] 5×100hp /10perHit single = 50s", Near(WaveSim.WaveTime(100, 5, oneStream), 50), WaveSim.WaveTime(100, 5, oneStream));
+        // two streams stack: 20 dmg/s -> 100hp in 5s
+        var two = new System.Collections.Generic.List<AtkStream> { new AtkStream(10, 1, 1), new AtkStream(10, 1, 1) };
+        Check("[wave] two 10/1s streams kill 100hp in 5s", Near(WaveSim.WaveTime(100, 1, two), 5), WaveSim.WaveTime(100, 1, two));
+        Check("[wave] no usable stream = +inf", double.IsPositiveInfinity(WaveSim.WaveTime(100, 1, new System.Collections.Generic.List<AtkStream>())), -1);
+        // StageTime: 2 waves × (0.8 spawn + 5s battle) + 4.25 end, no approach/entry/boss = 2*(5.8)+4.25 = 15.85
+        double st = WaveSim.StageTime(2, 5, 100, bigHit, 0, 0, 0);
+        Check("[wave] StageTime 2w×(0.8+5)+4.25 = 15.85", Near(st, 15.85, 0.01), st);
         var fb2 = ClearTimeSim.SimulateFallback(100, 1.0, 1.0, 5.0);  // all-active -> speed alone saves 0
         Check("[sim] fallback dpsFrac=1: speed alone saves nothing", Near(fb2.SavedSec, 0), fb2.SavedSec);
         var fb0 = ClearTimeSim.SimulateFallback(0, 0.6, 2.0, 2.0);
