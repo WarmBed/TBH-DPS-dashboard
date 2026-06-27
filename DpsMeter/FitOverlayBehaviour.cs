@@ -529,7 +529,7 @@ namespace TbhDpsMeter
                     for (int s = 0; s < SlotParts.Length; s++) { var cc = SlotSockets(hcol, s); int t = cc[0] + cc[1] + cc[2]; sr += 1 + (t > 0 ? (t + 1) / 2 : 0); }
                     if (sr > maxSlotRows) maxSlotRows = sr;
                 }
-                int clearRows = (_clearStages.Count > 0 ? _clearStages.Count + 2 : 2);   // title + per-stage + average (or "no data")
+                int clearRows = (_clearStages.Count > 0 ? _clearStages.Count + 3 : 2);   // title + legend + per-stage + average
                 int mainRows = clearRows + 6 + maxSlotRows;   // clear-time + (header+dps+4 stat-rows) + gear+chip-sockets
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
@@ -853,9 +853,12 @@ namespace TbhDpsMeter
             if (ph == "") { double rr = ratioByHero != null && ratioByHero.TryGetValue(hero, out var v) ? v : 1.0; ph = $"{HeroProbe.HeroName(hero)}×{rr:0.00}"; }
             GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>⏱ {Loc.G("fit_cleartitle")}</color>  <size=10>{ph}</size>", _label);
             cy += lh;
+            // legend: 地板 = fixed spawn/end floor (DPS can't cut it); 戰 = the DPS-bound kill+cadence time
+            GUI.Label(new Rect(ix + 258, cy, iw - 258, lh), $"<size=10><color=#7d8aa0>■地板=固定</color>  <color=#9fb4cc>■戰=DPS壓縮</color></size>", _dim);
+            cy += (int)(lh * 0.7f);
             if (_clearStages.Count == 0) { GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#67707d>{Loc.G("fit_norun")}</color></size>", _label); return cy + lh; }
 
-            float barX = ix + 290, barW = iw - 290;
+            float barX = ix + 416, barW = iw - 416;
             double maxBase = 0, totSaved = 0, totBase = 0;
             // pre-pass for bar scaling
             foreach (var r in _clearStages)
@@ -882,14 +885,19 @@ namespace TbhDpsMeter
                 var sim = ClearTimeSim.SimulateFloor(total, waveCount, F);   // floor (spawn/end) fixed; everything above is DPS-bound
                 bool faster = sim.SavedSec > 0.05, slower = sim.SavedSec < -0.05;
                 string nc = faster ? "#7fffa0" : (slower ? "#ff8a8a" : "#cdd5df");
-                GUI.Label(new Rect(ix, cy, 96, lh), $"<size=11>{StageLabel(r.StageId)}</size>", _label);
-                GUI.Label(new Rect(ix + 98, cy, 118, lh), $"<size=11><color=#8a93a0>{sim.BaseClear:0}s</color> → <color={nc}>{sim.NewClear:0}s</color></size>", _label);
-                GUI.Label(new Rect(ix + 218, cy, 70, lh), $"<size=11><color={nc}>{(sim.SavedSec >= 0 ? "−" : "+")}{System.Math.Abs(sim.SavedSec):0.0}s</color></size>", _label);
-                // bar: base track (gray) + predicted overlay (green shorter / red longer)
+                double floor = System.Math.Min(ClearTimeSim.FixedFloor(waveCount), sim.BaseClear);
+                double battle = System.Math.Max(0, sim.NewClear - floor);   // the DPS-bound part after the fix
+                GUI.Label(new Rect(ix, cy, 92, lh), $"<size=11>{StageLabel(r.StageId)}</size>", _label);
+                GUI.Label(new Rect(ix + 94, cy, 104, lh), $"<size=11><color=#8a93a0>{sim.BaseClear:0}s</color> → <color={nc}>{sim.NewClear:0}s</color></size>", _label);
+                GUI.Label(new Rect(ix + 200, cy, 54, lh), $"<size=11><color={nc}>{(sim.SavedSec >= 0 ? "−" : "+")}{System.Math.Abs(sim.SavedSec):0.0}s</color></size>", _label);
+                GUI.Label(new Rect(ix + 258, cy, 156, lh), $"<size=11><color=#7d8aa0>地板{floor:0}</color> + <color={nc}>戰{battle:0}</color></size>", _label);
+                // bar: gray base track + [floor (fixed, slate)] + [battle (compressible, green/red)]
                 float by = cy + lh * 0.5f - 3;
                 DrawRect(barX, by, (float)(barW * sim.BaseClear / maxBase), 6, new Color(1, 1, 1, 0.10f));
+                float floorW = (float)(barW * floor / maxBase), newW = (float)(barW * sim.NewClear / maxBase);
+                DrawRect(barX, by, Mathf.Min(floorW, newW), 6, new Color(0.42f, 0.48f, 0.60f, 0.80f));
                 var col = faster ? new Color(0.50f, 1f, 0.63f, 0.85f) : (slower ? new Color(1f, 0.54f, 0.54f, 0.85f) : new Color(0.80f, 0.84f, 0.87f, 0.6f));
-                DrawRect(barX, by, (float)(barW * sim.NewClear / maxBase), 6, col);
+                if (newW > floorW) DrawRect(barX + floorW, by, newW - floorW, 6, col);
                 cy += lh; totSaved += sim.SavedSec; totBase += sim.BaseClear;
             }
             if (totBase > 0)
