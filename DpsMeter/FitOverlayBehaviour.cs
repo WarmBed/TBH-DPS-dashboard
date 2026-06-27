@@ -18,7 +18,9 @@ namespace TbhDpsMeter
                 GearDatabase.LoadGear(ReadRes(asm, "fit_gear.json"));
                 MatCatalog.Load(ReadRes(asm, "fit_mats.json"));
                 SocketDb.Load(ReadRes(asm, "fit_sockets.json"));
-                Plugin.Logger?.LogInfo($"[fit] gear DB: {GearDatabase.Count} items loaded");
+                SkillDb.Load(ReadRes(asm, "fit_skills.json"));
+                StageDb.Load(ReadRes(asm, "fit_stages.json"));
+                Plugin.Logger?.LogInfo($"[fit] gear DB: {GearDatabase.Count} items, {SkillDb.Count} skills, {StageDb.Count} stages loaded");
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("FitDataStore: " + e.Message); }
         }
@@ -89,6 +91,10 @@ namespace TbhDpsMeter
         private readonly List<int> _fitIdx = new List<int>();           // parallel: store index per shown row
         private readonly List<RunRecord> _clearStages = new List<RunRecord>();   // latest run per farmed stage (built on Reload), for the live clear-time block
         private readonly HashSet<int> _partyHeroes = new HashSet<int>();          // heroKeys that fought in the newest run (the current party — no save field for it)
+        // cached iterative clear-time sim (recomputed only when the sandbox streams change — WaveSim is heavy)
+        private readonly List<string> _simStage = new List<string>();
+        private readonly List<double> _simBase = new List<double>(), _simNew = new List<double>(), _simFloor = new List<double>();
+        private int _simHash = -1;
         // flat/percent split of the orig + sandbox loadouts, for live-anchored stat display (set each frame in OnGUI)
         private Dictionary<string, double> _fpFlatO, _fpPctO, _fpFlatN, _fpPctN;
         private float _savedFlash;      // frame counter for the "已儲存" toast
@@ -236,6 +242,7 @@ namespace TbhDpsMeter
             }
             catch { }
             if (_heroIdx >= _heroes.Count) _heroIdx = 0;
+            _simHash = -1;   // force the iterative clear-time sim to recompute after a reload
             _loaded = true;
         }
 
@@ -595,8 +602,29 @@ namespace TbhDpsMeter
                 // per-hero DPS ratios → party clear-time at the TOP (combines EVERY member's edits). Move speed is
                 // deliberately NOT modelled: the game's "no-damage" time is monster-approach (uses MONSTER speed) +
                 // fixed spawn/cooldown timers, and 120 real runs show +14% hero move-speed changed idle by ~0s.
+                // skills per hero (from run snapshots) for the iterative WaveSim
+                var skKeys = new Dictionary<int, List<int>>(); var skLvl = new Dictionary<int, List<int>>();
+                foreach (var rr0 in _clearStages) if (rr0.Party != null) foreach (var snap in rr0.Party)
+                {
+                    if (snap == null || snap.Skills == null || snap.Skills.Count == 0 || !int.TryParse(snap.Character, out var hk) || skKeys.ContainsKey(hk)) continue;
+                    var kl = new List<int>(); var ll = new List<int>();
+                    foreach (var sk in snap.Skills) if (sk.Key > 0) { kl.Add(sk.Key); ll.Add(sk.Level); }
+                    if (kl.Count > 0) { skKeys[hk] = kl; skLvl[hk] = ll; }
+                }
+                // per-hero DPS ratios + attack streams (focused uses the _fp set above; others via HeroRatio)
                 var ratioByHero = new Dictionary<int, double>();
-                foreach (var hh in _heroes) ratioByHero[hh] = (hh == hero) ? ratio : HeroRatio(hh);
+                var curStreams = new Dictionary<int, List<AtkStream>>();
+                var sbStreams = new Dictionary<int, List<AtkStream>>();
+                AddStreams(hero, live, skKeys, skLvl, curStreams, sbStreams);
+                foreach (var hh in _heroes)
+                {
+                    if (hh == hero) { ratioByHero[hh] = ratio; continue; }
+                    ratioByHero[hh] = HeroRatio(hh);   // sets _fp* for hh
+                    _liveStats.TryGetValue(hh, out var lvh);
+                    AddStreams(hh, lvh, skKeys, skLvl, curStreams, sbStreams);
+                }
+                int simHash = StreamHash(sbStreams);
+                if (simHash != _simHash) { _simHash = simHash; RecomputeSim(curStreams, sbStreams); }
                 cy = DrawClearRows(ix, cy, iw, lh, hero, ratioByHero);
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
@@ -835,6 +863,58 @@ namespace TbhDpsMeter
             return od > 0 ? DamageFormula.ExpectedDps(nc) / od : 1.0;
         }
 
+        // build a hero's CURRENT (live) and SANDBOX (DispFP'd) attack streams. Must be called with this hero's
+        // _fp* fields already set (so DispFP gives its sandbox stats). Skills come from its run snapshot.
+        private void AddStreams(int hero, Dictionary<string, double> live,
+            Dictionary<int, List<int>> skKeys, Dictionary<int, List<int>> skLvl,
+            Dictionary<int, List<AtkStream>> cur, Dictionary<int, List<AtkStream>> sb)
+        {
+            if (live == null) return;
+            double a = Sv(live, "attack"), asp = Sv(live, "aspd"), cr = Sv(live, "critrate"), cd = Sv(live, "critdmg"), cdr = Sv(live, "cdr");
+            skKeys.TryGetValue(hero, out var ks); skLvl.TryGetValue(hero, out var ls);
+            cur[hero] = StreamBuilder.Build(hero, a, asp, cr, cd, cdr, ks, ls);
+            sb[hero] = StreamBuilder.Build(hero,
+                DispFP(a, "AttackDamage", 1), DispFP(asp, "AttackSpeed", 1),
+                DispFP(cr * 100, "CriticalChance", 10) / 100.0, DispFP(cd * 100, "CriticalDamage", 10) / 100.0,
+                DispFP(cdr * 100, "CooldownReduction", 10) / 100.0, ks, ls);
+        }
+
+        // cheap change-hash over the sandbox streams, so RecomputeSim only runs when an edit changes something.
+        private static int StreamHash(Dictionary<int, List<AtkStream>> sb)
+        {
+            int h = 17;
+            foreach (var kv in sb) { h = h * 31 + kv.Key; foreach (var s in kv.Value) h = h * 31 + (int)s.PerHit + (int)(s.Interval * 137) + s.Targets; }
+            return h;
+        }
+
+        // run the iterative WaveSim for every farmed stage: calibrate the effHP scale so the CURRENT streams
+        // reproduce the measured clear, then predict with the SANDBOX streams. Overkill / cadence / AoE fall out.
+        private void RecomputeSim(Dictionary<int, List<AtkStream>> cur, Dictionary<int, List<AtkStream>> sb)
+        {
+            _simStage.Clear(); _simBase.Clear(); _simNew.Clear(); _simFloor.Clear();
+            foreach (var r in _clearStages)
+            {
+                double measured = r.ActiveSeconds + r.IdleSeconds;
+                int wc = r.WaveDurations != null ? r.WaveDurations.Count : 0;
+                _simStage.Add(r.StageId); _simBase.Add(measured);
+                var curS = new List<AtkStream>(); var sbS = new List<AtkStream>();
+                if (r.Party != null) foreach (var snap in r.Party)
+                {
+                    if (snap == null || snap.DamageDealt <= 0 || !int.TryParse(snap.Character, out var hk)) continue;
+                    if (cur.TryGetValue(hk, out var cs)) curS.AddRange(cs);
+                    if (sb.TryGetValue(hk, out var ss)) sbS.AddRange(ss);
+                }
+                if (!StageDb.TryGet(r.StageId, out var st) || st.Waves <= 0 || curS.Count == 0 || sbS.Count == 0)
+                {   // no sim data → fall back to the floor model (measured unchanged baseline)
+                    _simNew.Add(measured); _simFloor.Add(ClearTimeSim.FixedFloor(wc > 0 ? wc : st.Waves));
+                    continue;
+                }
+                double k = StreamBuilder.CalibrateHpScale(st, curS, measured);   // effHP scale so current ≈ measured
+                double pred = WaveSim.StageTime(st.Waves, st.Mpw, st.EffHp * k, sbS, 0, 0, st.BossHp * k);
+                _simNew.Add(pred); _simFloor.Add(ClearTimeSim.FixedFloor(st.Waves));
+            }
+        }
+
         // live clear-time prediction block, drawn in the top panel under the stats. Each stage's clear =
         // active/F + idle, where the party-DPS factor F = Σ (each party member's damage share × its DPS ratio)
         // — so editing ANY party member moves it. idle is NOT scaled (move speed barely affects clear time —
@@ -860,51 +940,32 @@ namespace TbhDpsMeter
 
             float barX = ix + 416, barW = iw - 416;
             double maxBase = 0, totSaved = 0, totBase = 0;
-            // pre-pass for bar scaling
-            foreach (var r in _clearStages)
-            {
-                double t = (r.ActiveSeconds + r.IdleSeconds);
-                if (t > maxBase) maxBase = t;
-            }
+            for (int i = 0; i < _simBase.Count; i++) if (_simBase[i] > maxBase) maxBase = _simBase[i];
             if (maxBase <= 0) maxBase = 1;
-            foreach (var r in _clearStages)
+            // each row = the cached iterative sim: BaseClear (measured) → NewClear (predicted), floor/battle split
+            for (int i = 0; i < _simStage.Count; i++)
             {
-                // F = Σ share_h × ratio_h over this run's participants (+ unattributed damage at ratio 1)
-                double F = 0, sumShare = 0;
-                if (r.Party != null) foreach (var snap in r.Party)
-                {
-                    if (snap == null || !int.TryParse(snap.Character, out var hk2)) continue;
-                    double share = r.Total > 0 ? snap.DamageDealt / r.Total : 0;
-                    double rh = ratioByHero != null && ratioByHero.TryGetValue(hk2, out var rr) ? rr : 1.0;
-                    F += share * rh; sumShare += share;
-                }
-                F += System.Math.Max(0, 1 - sumShare);
-                if (F <= 1e-6) F = 1.0;
-                int waveCount = r.WaveDurations != null ? r.WaveDurations.Count : 0;
-                double total = r.ActiveSeconds + r.IdleSeconds;
-                var sim = ClearTimeSim.SimulateFloor(total, waveCount, F);   // floor (spawn/end) fixed; everything above is DPS-bound
-                bool faster = sim.SavedSec > 0.05, slower = sim.SavedSec < -0.05;
+                double baseC = _simBase[i], newC = _simNew[i], floor = System.Math.Min(_simFloor[i], baseC);
+                double saved = baseC - newC, battle = System.Math.Max(0, newC - floor);
+                bool faster = saved > 0.05, slower = saved < -0.05;
                 string nc = faster ? "#7fffa0" : (slower ? "#ff8a8a" : "#cdd5df");
-                double floor = System.Math.Min(ClearTimeSim.FixedFloor(waveCount), sim.BaseClear);
-                double battle = System.Math.Max(0, sim.NewClear - floor);   // the DPS-bound part after the fix
-                GUI.Label(new Rect(ix, cy, 92, lh), $"<size=11>{StageLabel(r.StageId)}</size>", _label);
-                GUI.Label(new Rect(ix + 94, cy, 104, lh), $"<size=11><color=#8a93a0>{sim.BaseClear:0}s</color> → <color={nc}>{sim.NewClear:0}s</color></size>", _label);
-                GUI.Label(new Rect(ix + 200, cy, 54, lh), $"<size=11><color={nc}>{(sim.SavedSec >= 0 ? "−" : "+")}{System.Math.Abs(sim.SavedSec):0.0}s</color></size>", _label);
+                GUI.Label(new Rect(ix, cy, 92, lh), $"<size=11>{StageLabel(_simStage[i])}</size>", _label);
+                GUI.Label(new Rect(ix + 94, cy, 104, lh), $"<size=11><color=#8a93a0>{baseC:0}s</color> → <color={nc}>{newC:0}s</color></size>", _label);
+                GUI.Label(new Rect(ix + 200, cy, 54, lh), $"<size=11><color={nc}>{(saved >= 0 ? "−" : "+")}{System.Math.Abs(saved):0.0}s</color></size>", _label);
                 GUI.Label(new Rect(ix + 258, cy, 156, lh), $"<size=11><color=#7d8aa0>地板{floor:0}</color> + <color={nc}>戰{battle:0}</color></size>", _label);
-                // bar: gray base track + [floor (fixed, slate)] + [battle (compressible, green/red)]
                 float by = cy + lh * 0.5f - 3;
-                DrawRect(barX, by, (float)(barW * sim.BaseClear / maxBase), 6, new Color(1, 1, 1, 0.10f));
-                float floorW = (float)(barW * floor / maxBase), newW = (float)(barW * sim.NewClear / maxBase);
+                DrawRect(barX, by, (float)(barW * baseC / maxBase), 6, new Color(1, 1, 1, 0.10f));
+                float floorW = (float)(barW * floor / maxBase), newW = (float)(barW * newC / maxBase);
                 DrawRect(barX, by, Mathf.Min(floorW, newW), 6, new Color(0.42f, 0.48f, 0.60f, 0.80f));
                 var col = faster ? new Color(0.50f, 1f, 0.63f, 0.85f) : (slower ? new Color(1f, 0.54f, 0.54f, 0.85f) : new Color(0.80f, 0.84f, 0.87f, 0.6f));
                 if (newW > floorW) DrawRect(barX + floorW, by, newW - floorW, 6, col);
-                cy += lh; totSaved += sim.SavedSec; totBase += sim.BaseClear;
+                cy += lh; totSaved += saved; totBase += baseC;
             }
             if (totBase > 0)
             {
                 double pct = totSaved / totBase * 100;
                 string sc = totSaved > 0.05 ? "#7fffa0" : (totSaved < -0.05 ? "#ff8a8a" : "#cdd5df");
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "−" : "+")}{System.Math.Abs(pct):0.#}%</color></size>", _label);
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "−" : "+")}{System.Math.Abs(pct):0.#}%</color>  <size=9><color=#6b7280>迭代模擬</color></size></size>", _label);
                 cy += lh;
             }
             return cy;

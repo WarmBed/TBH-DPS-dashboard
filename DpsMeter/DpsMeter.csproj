@@ -26,6 +26,8 @@
     <EmbeddedResource Include="fit_gear.json" />
     <EmbeddedResource Include="fit_mats.json" />
     <EmbeddedResource Include="fit_sockets.json" />
+    <EmbeddedResource Include="fit_skills.json" />
+    <EmbeddedResource Include="fit_stages.json" />
   </ItemGroup>
 
   <ItemGroup>
