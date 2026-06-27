@@ -872,7 +872,9 @@ namespace TbhDpsMeter
                 }
                 F += System.Math.Max(0, 1 - sumShare);
                 if (F <= 1e-6) F = 1.0;
-                var sim = ClearTimeSim.SimulateSplit(r.ActiveSeconds, r.IdleSeconds, F, 1.0);   // idle unscaled (see header)
+                int waveCount = r.WaveDurations != null ? r.WaveDurations.Count : 0;
+                double total = r.ActiveSeconds + r.IdleSeconds;
+                var sim = ClearTimeSim.SimulateFloor(total, waveCount, F);   // floor (spawn/end) fixed; everything above is DPS-bound
                 bool faster = sim.SavedSec > 0.05, slower = sim.SavedSec < -0.05;
                 string nc = faster ? "#7fffa0" : (slower ? "#ff8a8a" : "#cdd5df");
                 GUI.Label(new Rect(ix, cy, 96, lh), $"<size=11>{StageLabel(r.StageId)}</size>", _label);

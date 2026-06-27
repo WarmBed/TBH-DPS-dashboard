@@ -113,6 +113,29 @@ namespace TbhDpsMeter
             return row;
         }
 
+        /// <summary>Decompiled fixed floor of a stage clear: per-wave spawn-anim 0.8s + stage-end 4.25s (from the
+        /// Cpp2IL dig — see [[combat-clear-model]]). Move-speed- and DPS-independent.</summary>
+        public static double FixedFloor(int waveCount) => 4.25 + 0.8 * (waveCount > 0 ? waveCount : 1);
+
+        /// <summary>Clear-time what-if anchored to a measured run: everything ABOVE the fixed spawn/end floor
+        /// (the kill time AND the between-attack/cast-cooldown gaps) is DPS-bound and rescales by the party-DPS
+        /// factor; only the floor is incompressible. Grounded in 120 runs: idle far exceeds the floor and the
+        /// excess tracks combat, not movement, so it must compress with DPS (the old idle-frozen model under-credited
+        /// DPS). <paramref name="totalSec"/> = measured clear (active+idle); <paramref name="waveCount"/> from the run.</summary>
+        public static SimRow SimulateFloor(double totalSec, int waveCount, double partyDpsFactor)
+        {
+            var row = new SimRow { BaseClear = totalSec };
+            if (totalSec <= 0) return row;
+            double f = partyDpsFactor > 0 ? partyDpsFactor : 1.0;
+            double floor = FixedFloor(waveCount);
+            if (floor > totalSec) floor = totalSec;          // tiny stages already at the floor
+            row.DpsFrac = totalSec > 0 ? (totalSec - floor) / totalSec : 0;
+            row.NewClear = floor + (totalSec - floor) / f;
+            row.SavedSec = totalSec - row.NewClear;
+            row.SavedPct = totalSec > 0 ? row.SavedSec / totalSec : 0;
+            return row;
+        }
+
         /// <summary>Simulate an UN-cleared stage from an estimated clear time and an assumed DPS-bound fraction
         /// (e.g. the average active-fraction of your cleared stages). clearSec ≤ 0 ⇒ all-zero row.</summary>
         public static SimRow SimulateFallback(double clearSec, double dpsFrac, double partyDpsFactor, double speedMult)

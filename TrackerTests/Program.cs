@@ -679,6 +679,15 @@ class Tests
         var s14 = ClearTimeSim.SimulateSplit(90.5, 55.5, 2.11, 1.0);
         Check("[sim] 1-4 real split saves ~33% (not 52%)", s14.SavedPct > 0.30 && s14.SavedPct < 0.36, s14.SavedPct);
 
+        // --- SimulateFloor: floor (0.8/wave + 4.25) fixed; everything above is DPS-bound ---
+        Check("[sim] FixedFloor(29) = 4.25 + 0.8×29 = 27.45", Near(ClearTimeSim.FixedFloor(29), 27.45), ClearTimeSim.FixedFloor(29));
+        var sf = ClearTimeSim.SimulateFloor(100, 29, 2.0);       // floor 27.45; (100-27.45)/2 + 27.45 = 63.725
+        Check("[sim] floor model 100s/29w/×2 = 63.7", Near(sf.NewClear, 63.725, 0.01), sf.NewClear);
+        var sf1 = ClearTimeSim.SimulateFloor(100, 29, 1.0);      // no DPS change -> unchanged
+        Check("[sim] floor model ×1 unchanged", Near(sf1.NewClear, 100), sf1.NewClear);
+        var sft = ClearTimeSim.SimulateFloor(3, 1, 5.0);         // tiny stage already at floor (5.05 > 3) -> clamps, no save
+        Check("[sim] floor clamps tiny stage", Near(sft.NewClear, 3), sft.NewClear);
+
         // --- SimulateFallback: an uncleared stage uses an average active-fraction ---
         var fb = ClearTimeSim.SimulateFallback(100, 0.6, 2.0, 1.0);   // 100*(0.6/2 + 0.4/1) = 70
         Check("[sim] fallback mixed = 70", Near(fb.NewClear, 70), fb.NewClear);
