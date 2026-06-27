@@ -23,8 +23,10 @@ namespace TbhDpsMeter
         public string Name;
         public double Value;
         public string Mod;   // "FLAT" / "ADDITIVE" / "MULTIPLICATIVE" (from EnchantData.ModType); "" if unknown
-        public Affix(string name, double value) { Name = name; Value = value; Mod = ""; }
-        public Affix(string name, double value, string mod) { Name = name; Value = value; Mod = mod; }
+        public int Recipe;   // EnchantData.RecipeType: 3=decoration / 4=engraving / 5=inscription (0 = unknown/legacy)
+        public Affix(string name, double value) { Name = name; Value = value; Mod = ""; Recipe = 0; }
+        public Affix(string name, double value, string mod) { Name = name; Value = value; Mod = mod; Recipe = 0; }
+        public Affix(string name, double value, string mod, int recipe) { Name = name; Value = value; Mod = mod; Recipe = recipe; }
     }
 
     /// <summary>One equipped item with its affixes/mods.</summary>

@@ -186,20 +186,26 @@ namespace TbhDpsMeter
                         int si; if (!int.TryParse(g.Slot.Substring(4), out si)) continue;
                         if (si < 0 || si >= arr.Length) continue;
                         arr[si] = g.ItemKey;
-                        // real applied socket effects (EnchantData), placed into the grade's socket cells in
-                        // deco → engrave → inscribe order (the save lists them grouped, with applied counts)
+                        // real applied socket effects (EnchantData) placed into the grade's socket cells. Each
+                        // EnchantData entry carries a RecipeType (3=deco / 4=engrave / 5=inscription) that tells its
+                        // socket type DIRECTLY — bucket by it. (The save's *AppliedTotalCount fields are operation
+                        // tallies, NOT slot-fill counts, so the old sequential/count mapping mis-placed enchants.)
                         var gt = GearDatabase.ByKey(g.ItemKey);
                         var cnt = SocketDb.Counts(gt != null ? gt.Grade : "");
                         int total = cnt[0] + cnt[1] + cnt[2];
                         if (total > 0 && g.Affixes.Count > 0)
                         {
                             var cells = new GearStat[total];
-                            int dc = Math.Min(g.DecoCount, cnt[0]), ec = Math.Min(g.EngraveCount, cnt[1]), ic = Math.Min(g.InscribeCount, cnt[2]);
-                            int ai = 0;
-                            // EnchantData carries the exact stat, value AND mod — use them directly
-                            for (int j = 0; j < cnt[0]; j++) if (j < dc && ai < g.Affixes.Count) { var af = g.Affixes[ai]; cells[j] = new GearStat(Short2EnumName(af.Name), af.Mod, af.Value); ai++; }
-                            for (int j = 0; j < cnt[1]; j++) if (j < ec && ai < g.Affixes.Count) { var af = g.Affixes[ai]; cells[cnt[0] + j] = new GearStat(Short2EnumName(af.Name), af.Mod, af.Value); ai++; }
-                            for (int j = 0; j < cnt[2]; j++) if (j < ic && ai < g.Affixes.Count) { var af = g.Affixes[ai]; cells[cnt[0] + cnt[1] + j] = new GearStat(Short2EnumName(af.Name), af.Mod, af.Value); ai++; }
+                            int di = 0, eiCell = 0, ii = 0;   // next free cell within each type-block
+                            foreach (var af in g.Affixes)
+                            {
+                                if (string.IsNullOrEmpty(af.Name)) continue;
+                                int pos = -1;
+                                if (af.Recipe == 4) { if (eiCell < cnt[1]) pos = cnt[0] + eiCell++; }
+                                else if (af.Recipe == 5) { if (ii < cnt[2]) pos = cnt[0] + cnt[1] + ii++; }
+                                else { if (di < cnt[0]) pos = di++; }   // 3 or unknown → decoration
+                                if (pos >= 0) cells[pos] = new GearStat(Short2EnumName(af.Name), af.Mod, af.Value);
+                            }
                             RealSockets.Set(kv.Key, si, cells);
                         }
                     }

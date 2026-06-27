@@ -160,7 +160,8 @@ namespace TbhDpsMeter
                                     if (st == 0 || val == 0) continue;
                                     int mt = (int)Json.Num(Json.Get(m, "ModType"));   // 0 FLAT / 1 ADDITIVE / 2 MULTIPLICATIVE
                                     string mod = mt == 1 ? "ADDITIVE" : (mt == 2 ? "MULTIPLICATIVE" : "FLAT");
-                                    g.Affixes.Add(new Affix(StatName(st), val, mod));
+                                    int rt = (int)Json.Num(Json.Get(m, "RecipeType"));   // 3 deco / 4 engrave / 5 inscription
+                                    g.Affixes.Add(new Affix(StatName(st), val, mod, rt));
                                 }
                             list.Add(g);
                         }
