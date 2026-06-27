@@ -586,15 +586,12 @@ namespace TbhDpsMeter
                 FitCalc.LoadoutFP(gearArr, sbLines, _fpFlatN, _fpPctN);
                 _liveStats.TryGetValue(hero, out var live);   // real character stats (anchor)
                 double ratio = LiveRatio(live);
-                // ratio + speedMult use the FOCUSED hero's _fp* fields, so compute them BEFORE the ratioByHero
-                // loop below (HeroRatio rebuilds _fp* for each other hero, clobbering the focused values).
-                double mspdLive = Sv(live, "mspd") * 100;
-                double speedMult = mspdLive > 0.0001 ? DispFP(mspdLive, "MovementSpeed", 1) / mspdLive : 1.0;
-
-                // per-hero DPS ratios → party clear-time at the TOP (combines every member's edits)
+                // per-hero DPS ratios → party clear-time at the TOP (combines EVERY member's edits). Move speed is
+                // deliberately NOT modelled: the game's "no-damage" time is monster-approach (uses MONSTER speed) +
+                // fixed spawn/cooldown timers, and 120 real runs show +14% hero move-speed changed idle by ~0s.
                 var ratioByHero = new Dictionary<int, double>();
                 foreach (var hh in _heroes) ratioByHero[hh] = (hh == hero) ? ratio : HeroRatio(hh);
-                cy = DrawClearRows(ix, cy, iw, lh, hero, ratioByHero, speedMult);
+                cy = DrawClearRows(ix, cy, iw, lh, hero, ratioByHero);
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
                 // ===== party heroes side by side, one column each (all expanded); click a gear slot to focus it =====
@@ -834,9 +831,10 @@ namespace TbhDpsMeter
         }
 
         // live clear-time prediction block, drawn in the top panel under the stats. Each stage's clear =
-        // active/F + idle/speed, where the party-DPS factor F = Σ (each party member's damage share × its DPS
-        // ratio) — so editing ANY party member moves the predicted clear time. Returns the new cy.
-        private float DrawClearRows(float ix, float cy, float iw, float lh, int hero, Dictionary<int, double> ratioByHero, double speedMult)
+        // active/F + idle, where the party-DPS factor F = Σ (each party member's damage share × its DPS ratio)
+        // — so editing ANY party member moves it. idle is NOT scaled (move speed barely affects clear time —
+        // see the IL2CPP/empirical investigation: monster-approach + spawn/cooldown timers dominate). Returns cy.
+        private float DrawClearRows(float ix, float cy, float iw, float lh, int hero, Dictionary<int, double> ratioByHero)
         {
             // header: the party + each member's ratio (★ members), so it's clear the prediction is whole-party
             string ph = "";
@@ -874,7 +872,7 @@ namespace TbhDpsMeter
                 }
                 F += System.Math.Max(0, 1 - sumShare);
                 if (F <= 1e-6) F = 1.0;
-                var sim = ClearTimeSim.SimulateSplit(r.ActiveSeconds, r.IdleSeconds, F, speedMult);
+                var sim = ClearTimeSim.SimulateSplit(r.ActiveSeconds, r.IdleSeconds, F, 1.0);   // idle unscaled (see header)
                 bool faster = sim.SavedSec > 0.05, slower = sim.SavedSec < -0.05;
                 string nc = faster ? "#7fffa0" : (slower ? "#ff8a8a" : "#cdd5df");
                 GUI.Label(new Rect(ix, cy, 96, lh), $"<size=11>{StageLabel(r.StageId)}</size>", _label);
