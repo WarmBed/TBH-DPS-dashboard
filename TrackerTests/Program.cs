@@ -777,18 +777,18 @@ class Tests
         var bc = SocketDb.Counts("BEYOND");
         Check("[fit] BEYOND sockets 2/2/1", bc[0] == 2 && bc[1] == 2 && bc[2] == 1, string.Join(",", bc));
 
-        // aggregation: AttackDamage FLAT 7 × (1 + 221/100) = 22.47 ; AttackSpeed FLAT 20
+        // aggregation: percent mods are ×10, so ADDITIVE 221 = 22.1% -> 7 × (1 + 221/1000) = 8.547 ; AttackSpeed FLAT 20
         var agg = StatAggregator.Aggregate(bow.Stats);
-        Check("[fit] agg AttackDamage = 7×3.21 = 22.47", Near(agg["AttackDamage"], 22.47, 0.01), agg.ContainsKey("AttackDamage") ? agg["AttackDamage"] : -1);
+        Check("[fit] agg AttackDamage = 7×1.221 = 8.547", Near(agg["AttackDamage"], 8.547, 0.01), agg.ContainsKey("AttackDamage") ? agg["AttackDamage"] : -1);
         Check("[fit] agg AttackSpeed = 20", Near(agg["AttackSpeed"], 20), agg.ContainsKey("AttackSpeed") ? agg["AttackSpeed"] : -1);
         var agg2 = StatAggregator.Aggregate(new System.Collections.Generic.List<GearStat> { new GearStat("AttackDamage", "FLAT", 10), new GearStat("AttackDamage", "MULTIPLICATIVE", 50) });
-        Check("[fit] agg mult 10×1.5 = 15", Near(agg2["AttackDamage"], 15), agg2.ContainsKey("AttackDamage") ? agg2["AttackDamage"] : -1);
+        Check("[fit] agg mult 10×1.05 = 10.5", Near(agg2["AttackDamage"], 10.5), agg2.ContainsKey("AttackDamage") ? agg2["AttackDamage"] : -1);
 
-        // socket folds into loadout stats: bow (slot 0) + weapon-deco AttackDamage+10 → (7+10)×3.21
+        // socket folds into loadout stats: bow (slot 0) + weapon-deco AttackDamage+10 (FLAT) → (7+10)×1.221
         var gear = new int[] { 301041, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
         var socks = new System.Collections.Generic.Dictionary<int, int[]> { { 0, new int[] { 110001 } } };
         var aggS = FitCalc.LoadoutStats(gear, socks);
-        Check("[fit] socket effect folds in (17×3.21=54.57)", aggS.ContainsKey("AttackDamage") && Near(aggS["AttackDamage"], 54.57, 0.01), aggS.ContainsKey("AttackDamage") ? aggS["AttackDamage"] : -1);
+        Check("[fit] socket effect folds in (17×1.221=20.757)", aggS.ContainsKey("AttackDamage") && Near(aggS["AttackDamage"], 20.757, 0.01), aggS.ContainsKey("AttackDamage") ? aggS["AttackDamage"] : -1);
     }
 
     // ================= RunRetention (per-stage history) =================

@@ -79,6 +79,12 @@ namespace TbhDpsMeter
         private readonly List<int> _sockPosList = new List<int>();    // parallel: socket position per cell
         private readonly List<Rect> _focusRects = new List<Rect>();   // clickable gear rows (set focus)
         private int _picker = -1;       // slot whose item list is open (-1 = main view)
+        private bool _fitList;          // load-fitting side panel open
+        private Rect _saveRect, _loadRect;
+        private readonly List<Rect> _fitLoadRects = new List<Rect>();   // per saved-fit "load" hitboxes
+        private readonly List<Rect> _fitDelRects = new List<Rect>();    // per saved-fit "delete" hitboxes
+        private readonly List<int> _fitIdx = new List<int>();           // parallel: store index per shown row
+        private float _savedFlash;      // frame counter for the "已儲存" toast
         private int _pickerPage;
         private string _pickGrade = "";  // active grade-filter chip in the picker ("" = all)
         private readonly List<Rect> _gradeRects = new List<Rect>();   // grade-chip hitboxes
@@ -244,14 +250,14 @@ namespace TbhDpsMeter
         {
             var cc = SlotSockets(CurHero, slot);
             _sockType = pos < cc[0] ? 'D' : (pos < cc[0] + cc[1] ? 'E' : 'I');
-            _sockSlot = slot; _sockPos = pos; _picker = -1; _pickerPage = 0; _pickGrade = "";
+            _sockSlot = slot; _sockPos = pos; _picker = -1; _fitList = false; _pickerPage = 0; _pickGrade = "";
         }
 
         private void HandlePointer()
         {
             if (GameUiState.MenuOpen()) { if (_dragging) { _dragging = false; InputCompat.ReleaseDrag(Slot); } return; }
             Vector2 m = UiScale.ToLocal(InputCompat.MouseGuiPos(), _rect.x, _rect.y, _scale);
-            if (!(_picker >= 0 || _sockSlot >= 0))   // width is owned by the side-column when it's open; don't resize then
+            if (!(_picker >= 0 || _sockSlot >= 0 || _fitList))   // width is owned by the side-column when it's open; don't resize then
             {
                 float rw = _rect.width, dh = 0f;
                 var rr = _resize.Handle(Slot, m, ref rw, ref dh, 460f, Mathf.Max(460f, Screen.width * 0.95f), 0f, 0f, false);
@@ -263,6 +269,16 @@ namespace TbhDpsMeter
             if (InputCompat.MousePressed())
             {
                 if (_closeRect.Contains(m)) { _visible = false; return; }
+                if (_saveRect.Contains(m)) { SaveCurrentFit(); return; }
+                if (_loadRect.Contains(m)) { _fitList = !_fitList; _picker = -1; _sockSlot = -1; return; }
+                if (_fitList)
+                {
+                    if (_backRect.Contains(m)) { _fitList = false; return; }
+                    for (int i = 0; i < _fitLoadRects.Count && i < _fitIdx.Count; i++)
+                        if (_fitLoadRects[i].Contains(m)) { LoadFit(_fitIdx[i]); return; }
+                    for (int i = 0; i < _fitDelRects.Count && i < _fitIdx.Count; i++)
+                        if (_fitDelRects[i].Contains(m)) { FitStore.RemoveAt(_fitIdx[i]); return; }
+                }
                 // side-column hits (picker stays open; the main view below is still live, so fall through)
                 if (_picker >= 0)
                 {
@@ -288,7 +304,7 @@ namespace TbhDpsMeter
                 for (int i = 0; i < _tabRects.Count; i++)
                     if (_tabRects[i].Contains(m)) { _heroIdx = i; return; }   // keep the side-column open across heroes
                 for (int i = 0; i < _swapRects.Count; i++)
-                    if (_swapRects[i].Contains(m)) { _picker = i; _focus = i; _sockSlot = -1; _pickerPage = 0; _pickGrade = ""; return; }
+                    if (_swapRects[i].Contains(m)) { _picker = i; _focus = i; _sockSlot = -1; _fitList = false; _pickerPage = 0; _pickGrade = ""; return; }
                 for (int i = 0; i < _focusRects.Count; i++)
                     if (_focusRects[i].Contains(m)) { _focus = i; _sockSlot = -1; return; }
                 for (int i = 0; i < _sockRects.Count && i < _sockPosList.Count; i++)
@@ -400,7 +416,7 @@ namespace TbhDpsMeter
                 EnsureAssets(); if (!_placed) PlaceDefault(); if (!_loaded) Reload();
                 int fs = Fs; float lh = fs + 6;
                 // main column + optional item/material side-column to the RIGHT (expand, don't replace the page)
-                bool sideOpen = _picker >= 0 || _sockSlot >= 0;
+                bool sideOpen = _picker >= 0 || _sockSlot >= 0 || _fitList;
                 float baseW = Mathf.Max(560f, Plugin.FitPanelWidth.Value);
                 _rect.width = baseW + (sideOpen ? PickerW : 0f);
                 float x = _rect.x, ix = x + Pad, w = _rect.width, iw = baseW - Pad * 2;
@@ -420,10 +436,13 @@ namespace TbhDpsMeter
                 GUI.Box(_rect, GUIContent.none, _box); PanelBorder.Draw(_rect);
                 float cy = _rect.y + Pad;
 
-                // title + reset + close
-                GUI.Label(new Rect(ix, cy, iw - 90, lh), $"{Loc.G("fit_title")} <size=10><color=#8a93a0>{GearDatabase.Count} {Loc.G("fit_count")}</color></size>", _title);
+                // title + save / load / reset / close
+                GUI.Label(new Rect(ix, cy, iw - 200, lh), $"{Loc.G("fit_title")} <size=10><color=#8a93a0>{GearDatabase.Count} {Loc.G("fit_count")}</color></size>", _title);
+                _saveRect = new Rect(x + baseW - 28 - 56 - 4 - 38 - 4 - 38, cy - 1, 38, lh); GUI.Button(_saveRect, "💾" + Loc.G("fit_save"), _btn);
+                _loadRect = new Rect(x + baseW - 28 - 56 - 4 - 38, cy - 1, 38, lh); GUI.Button(_loadRect, "📂" + Loc.G("fit_load"), _btn);
                 _resetRect = new Rect(x + baseW - 28 - 56, cy - 1, 56, lh); GUI.Button(_resetRect, Loc.G("sim_reset"), _btn);
                 _closeRect = new Rect(x + baseW - 26, cy - 2, 22, lh); GUI.Button(_closeRect, "✕", _btn);
+                if (_savedFlash > 0f) { _savedFlash -= 1f; GUI.Label(new Rect(ix + 200, cy, 120, lh), $"<color=#7fffa0>✓ {Loc.G("fit_saved")}</color>", _label); }
                 cy += lh;
 
                 if (_heroes.Count == 0)
@@ -566,7 +585,8 @@ namespace TbhDpsMeter
                     DrawRect(divX, _rect.y + Pad, 1, _rect.height - Pad * 2, new Color(1, 1, 1, 0.14f));
                     float pix = divX + 8, piw = PickerW - 16, pcy = _rect.y + Pad + lh;
                     if (_picker >= 0) DrawPicker(pix, pcy, piw, lh, hero);
-                    else DrawSockPicker(pix, pcy, piw, lh, fgg);
+                    else if (_sockSlot >= 0) DrawSockPicker(pix, pcy, piw, lh, fgg);
+                    else DrawFitList(pix, pcy, piw, lh, hero);
                 }
                 _resize.DrawGrip(_white, _rect);
             }
@@ -650,6 +670,49 @@ namespace TbhDpsMeter
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
             GUI.Button(_ppPrev, "◀", _btn); GUI.Button(_ppNext, "▶", _btn);
             GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<color=#9fb4cc>{_pickerPage + 1}/{pages}　{list.Count} {Loc.G("fit_count")}</color>", _dim);
+        }
+
+        private void SaveCurrentFit()
+        {
+            int h = CurHero; if (h == 0) return;
+            var f = new FitStore.Fit { Hero = h };
+            if (_load.TryGetValue(h, out var g)) Array.Copy(g, f.Gear, Math.Min(g.Length, f.Gear.Length));
+            if (_sockets.TryGetValue(h, out var sm))
+                foreach (var kv in sm) { var a = new int[kv.Value.Length]; Array.Copy(kv.Value, a, a.Length); f.Sockets[kv.Key] = a; }
+            int n = 0; foreach (var e in FitStore.LoadAll()) if (e.Hero == h) n++;
+            f.Name = HeroProbe.HeroName(h) + " " + (n + 1);
+            FitStore.Add(f); _savedFlash = 90f;
+        }
+        private void LoadFit(int storeIdx)
+        {
+            var all = FitStore.LoadAll();
+            if (storeIdx < 0 || storeIdx >= all.Count) return;
+            var f = all[storeIdx];
+            int hi = _heroes.IndexOf(f.Hero); if (hi >= 0) _heroIdx = hi;
+            var g = new int[SlotParts.Length]; Array.Copy(f.Gear, g, Math.Min(f.Gear.Length, g.Length)); _load[f.Hero] = g;
+            var sm = SockOf(f.Hero); sm.Clear();
+            foreach (var kv in f.Sockets) { var a = new int[kv.Value.Length]; Array.Copy(kv.Value, a, a.Length); sm[kv.Key] = a; }
+            _fitList = false;
+        }
+        private void DrawFitList(float ix, float cy, float iw, float lh, int hero)
+        {
+            _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ " + Loc.G("fit_back"), _btn);
+            GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{Loc.G("fit_loadtitle")}</color>", _label);
+            cy += lh + 2;
+            _fitLoadRects.Clear(); _fitDelRects.Clear(); _fitIdx.Clear();
+            var all = FitStore.LoadAll();
+            for (int i = 0; i < all.Count; i++)
+            {
+                var f = all[i];
+                if ((i & 1) == 1) DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
+                DrawRect(ix, cy, 3, lh, ClassColor(f.Hero));
+                GUI.Label(new Rect(ix + 8, cy, iw - 8 - 78, lh), $"<color=#eaf3ee>{f.Name}</color>", _label);
+                var lr = new Rect(ix + iw - 76, cy + 1, 36, lh - 3); GUI.Button(lr, Loc.G("fit_load"), _btn);
+                var dr = new Rect(ix + iw - 36, cy + 1, 34, lh - 3); GUI.Button(dr, Loc.G("fit_del"), _btn);
+                _fitLoadRects.Add(lr); _fitDelRects.Add(dr); _fitIdx.Add(i);
+                cy += lh;
+            }
+            if (all.Count == 0) GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#67707d>{Loc.G("fit_nosaves")}</color>", _label);
         }
 
         private void DrawSockPicker(float ix, float cy, float iw, float lh, string gearGroup)

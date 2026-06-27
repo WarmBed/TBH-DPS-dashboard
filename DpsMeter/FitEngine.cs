@@ -274,10 +274,10 @@ namespace TbhDpsMeter
     }
 
     /// <summary>Aggregates a set of gear/material stat lines into a per-StatType total, PoE-style:
-    /// final = ΣFLAT × (1 + ΣADDITIVE/100) × Π(1 + MULTIPLICATIVE/100). The exact percent divisor is the
-    /// game's (assumed 100 until the native damage-formula decomp confirms it); callers ANCHOR to the
-    /// hero's measured stats (scale = measured / aggregated-current) so absolute values track reality and
-    /// only the loadout RATIO drives predictions. Pure C#.</summary>
+    /// final = ΣFLAT × (1 + ΣADDITIVE/1000) × Π(1 + MULTIPLICATIVE/1000). Percent values in the game data are
+    /// stored ×10 (e.g. AttackSpeed MUL 258 = 25.8%, CriticalDamage 1089 = 108.9%), so a percentage modifier
+    /// divides by 1000 (×10 scale × the formula's /100). Callers ANCHOR to the hero's measured stats so only
+    /// the loadout RATIO drives predictions. Pure C#.</summary>
     public static class StatAggregator
     {
         public static Dictionary<string, double> Aggregate(IEnumerable<GearStat> stats)
@@ -293,7 +293,7 @@ namespace TbhDpsMeter
                     {
                         case "ADDITIVE": add[s.Stat] = (add.TryGetValue(s.Stat, out var a) ? a : 0) + s.Value; break;
                         case "MULTIPLICATIVE":
-                            mul[s.Stat] = (mul.TryGetValue(s.Stat, out var m) ? m : 1.0) * (1.0 + s.Value / 100.0); break;
+                            mul[s.Stat] = (mul.TryGetValue(s.Stat, out var m) ? m : 1.0) * (1.0 + s.Value / 1000.0); break;
                         default: flat[s.Stat] = (flat.TryGetValue(s.Stat, out var f) ? f : 0) + s.Value; break;
                     }
                 }
@@ -306,7 +306,7 @@ namespace TbhDpsMeter
                 double f = flat.TryGetValue(k, out var ff) ? ff : 0;
                 double a = add.TryGetValue(k, out var aa) ? aa : 0;
                 double m = mul.TryGetValue(k, out var mm) ? mm : 1.0;
-                outp[k] = f * (1.0 + a / 100.0) * m;
+                outp[k] = f * (1.0 + a / 1000.0) * m;
             }
             return outp;
         }
