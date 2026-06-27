@@ -128,6 +128,9 @@ namespace TbhDpsMeter
 
         private Rect _closeRect, _resetRect, _optRect, _backRect, _clearHeadRect;
         private int _optFlash;                 // frames to show the "已最佳化" tick
+        private const float OptW = 236f;       // width of the left optimization-changelog panel
+        private Rect _optLogClose;             // ✕ to dismiss the changelog
+        private readonly List<OptChange> _optLog = new List<OptChange>();   // what 最佳化 changed (for the left list)
         // socket-optimizer working state (set before the greedy loop so OptEvalTotal can read it without lambdas)
         private OptCtx _optCtx; private int _optFocused; private Dictionary<string, double> _optLive;
         private Dictionary<int, List<int>> _optSkKeys, _optSkLvl;
@@ -279,9 +282,10 @@ namespace TbhDpsMeter
             if (_sockets.TryGetValue(hero, out var d) && d.TryGetValue(slot, out var a) && a != null && pos >= 0 && pos < a.Length) return a[pos];
             return 0;
         }
-        private void SetSocket(int slot, int pos, int matKey)
+        private void SetSocket(int slot, int pos, int matKey) => SetSocketFor(CurHero, slot, pos, matKey);
+        private void SetSocketFor(int h, int slot, int pos, int matKey)
         {
-            int h = CurHero; if (h == 0) return;
+            if (h == 0) return;
             var cc = SlotSockets(h, slot); int total = cc[0] + cc[1] + cc[2];
             if (total <= 0) return;
             var d = SockOf(h);
@@ -366,7 +370,8 @@ namespace TbhDpsMeter
                         if (_pickRects[i].Contains(m)) { SetSlot(_focus, _pickKeys[i]); return; }   // keep list open after a swap
                 }
                 if (_resetRect.Contains(m)) { ResetLoadout(); return; }
-                if (_optRect.Contains(m)) { OptimizeFocusedSockets(); return; }
+                if (_optRect.Contains(m)) { OptimizeAllSockets(); return; }
+                if (_optLog.Count > 0 && _optLogClose.Contains(m)) { _optLog.Clear(); return; }
                 if (_clearHeadRect.Contains(m) && Plugin.FitShowClear != null) { Plugin.FitShowClear.Value = !Plugin.FitShowClear.Value; _simHash = -1; return; }
                 for (int i = 0; i < _clearRowRects.Count; i++)
                     if (_clearRowRects[i].Contains(m)) { _simExpand = (_simExpand == i) ? -1 : i; return; }   // toggle per-wave drill-down
@@ -397,6 +402,7 @@ namespace TbhDpsMeter
             foreach (var h in _heroes)
                 if (_orig.TryGetValue(h, out var o)) { var c = new int[o.Length]; Array.Copy(o, c, o.Length); _load[h] = c; }
             _sockets.Clear();
+            _optLog.Clear();
             _pickGrade = ""; _pickStat = ""; _pickFirst = 0;
             _simHash = -1;   // force the iterative clear-time to recompute from the reset gear
         }
@@ -570,7 +576,8 @@ namespace TbhDpsMeter
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
                 _scale = UiScale.Fit(_rect.width, _rect.height);
-                if (!_dragging) { _rect.x = Mathf.Clamp(_wantX, 0f, Mathf.Max(0f, Screen.width - _rect.width * _scale)); _rect.y = Mathf.Clamp(_wantY, 0f, Mathf.Max(0f, Screen.height - _rect.height * _scale)); }
+                float minX = _optLog.Count > 0 ? (OptW + 6f) * _scale : 0f;   // keep the left changelog panel on-screen
+                if (!_dragging) { _rect.x = Mathf.Clamp(_wantX, minX, Mathf.Max(minX, Screen.width - _rect.width * _scale)); _rect.y = Mathf.Clamp(_wantY, 0f, Mathf.Max(0f, Screen.height - _rect.height * _scale)); }
                 x = _rect.x; ix = x + Pad;
                 GUI.matrix = UiScale.Matrix(_rect.x, _rect.y, _scale);
                 GUI.Box(_rect, GUIContent.none, _box); PanelBorder.Draw(_rect);
@@ -686,6 +693,7 @@ namespace TbhDpsMeter
                     else if (_fitList) DrawFitList(pix, pcy, piw, lh, hero);
                     else DrawPicker(pix, pcy, piw, lh, hero, _focus);
                 }
+                DrawOptLog(lh);
                 _resize.DrawGrip(_white, _rect);
             }
             catch { }
@@ -976,11 +984,13 @@ namespace TbhDpsMeter
             var list = new List<int>(); foreach (var kv in best) list.Add(kv.Value.Key); return list;
         }
 
-        // greedy coordinate-ascent: for the focused hero, assign each socket the material that most reduces the
-        // predicted clear time. Calibration (k, bCur) is fixed from the real gear; iterate to convergence.
-        private void OptimizeFocusedSockets()
+        // greedy coordinate-ascent over EVERY party hero's sockets: assign each socket the material that most
+        // reduces the predicted clear time. Calibration (k, bCur) is fixed from the real gear. Records each change
+        // into _optLog for the left changelog panel. Each hero is optimised against the others' CURRENT gear.
+        private void OptimizeAllSockets()
         {
-            int focused = CurHero; if (focused == 0 || _clearStages.Count == 0) return;
+            if (_clearStages.Count == 0) return;
+            _optLog.Clear();
             // skills per hero (from run snapshots), same source the sim uses
             _optSkKeys = new Dictionary<int, List<int>>(); _optSkLvl = new Dictionary<int, List<int>>();
             foreach (var r0 in _clearStages) if (r0.Party != null) foreach (var snap in r0.Party)
@@ -990,7 +1000,7 @@ namespace TbhDpsMeter
                 foreach (var sk in snap.Skills) if (sk.Key > 0) { kl.Add(sk.Key); ll.Add(sk.Level); }
                 if (kl.Count > 0) { _optSkKeys[hk] = kl; _optSkLvl[hk] = ll; }
             }
-            // every hero's CURRENT streams (live stats; independent of sockets, so fixed for the others)
+            // every hero's CURRENT streams (live stats; independent of sockets) + the shared per-stage baseline
             var curBy = new Dictionary<int, List<AtkStream>>();
             foreach (var h in _heroes)
             {
@@ -999,59 +1009,118 @@ namespace TbhDpsMeter
                 _optSkKeys.TryGetValue(h, out var ks); _optSkLvl.TryGetValue(h, out var ls);
                 curBy[h] = StreamBuilder.Build(h, Sv(lv, "attack"), Sv(lv, "aspd"), Sv(lv, "critrate"), Sv(lv, "critdmg"), Sv(lv, "cdr"), ks, ls, 1.0);
             }
-            // per-stage context (calibration + other heroes' streams), mirroring RecomputeSim's current side
             int n = _clearStages.Count;
-            var c = new OptCtx { N = n, Waves = new int[n], Mpw = new int[n], EffHP = new double[n], Boss = new double[n], K = new double[n], BCur = new double[n], Floor = new double[n], BM = new double[n], Other = new List<AtkStream>[n], FocIn = new bool[n], Valid = new bool[n] };
+            var bWaves = new int[n]; var bMpw = new int[n]; var bEffHP = new double[n]; var bBoss = new double[n];
+            var bK = new double[n]; var bBCur = new double[n]; var bFloor = new double[n]; var bBM = new double[n];
+            var bParts = new List<int>[n]; var bValid = new bool[n];
             for (int i = 0; i < n; i++)
             {
                 var r = _clearStages[i];
                 double measured = r.ActiveSeconds + r.IdleSeconds;
                 int wc = r.WaveDurations != null ? r.WaveDurations.Count : 0;
-                if (!StageDb.TryGet(r.StageId, out var st) || st.Waves <= 0) { c.Valid[i] = false; continue; }
+                if (!StageDb.TryGet(r.StageId, out var st) || st.Waves <= 0) { bValid[i] = false; continue; }
                 int waves = wc > 0 ? Math.Min(wc, st.Waves) : st.Waves; bool full = waves >= st.Waves; double boss = full ? st.BossHp : 0;
-                var all = new List<AtkStream>(); var other = new List<AtkStream>(); bool focIn = false;
+                var all = new List<AtkStream>(); var parts = new List<int>();
                 if (r.Party != null) foreach (var snap in r.Party)
                 {
                     if (snap == null || snap.DamageDealt <= 0 || !int.TryParse(snap.Character, out var hk) || !curBy.TryGetValue(hk, out var cs)) continue;
-                    all.AddRange(cs); if (hk == focused) focIn = true; else other.AddRange(cs);
+                    all.AddRange(cs); parts.Add(hk);
                 }
-                if (all.Count == 0) { c.Valid[i] = false; continue; }
+                if (all.Count == 0) { bValid[i] = false; continue; }
                 double floor = Math.Min(measured, 0.8 * waves + 2.45 + (full ? 4.25 : 0.0));
                 double bm = Math.Max(0.5, measured - floor);
                 double k = StreamBuilder.CalibrateHpScale(waves, st.Mpw, st.EffHp, boss, all, bm);
-                c.Waves[i] = waves; c.Mpw[i] = st.Mpw; c.EffHP[i] = st.EffHp; c.Boss[i] = boss; c.K[i] = k;
-                c.BCur[i] = WaveSim.BattleTime(waves, st.Mpw, st.EffHp * k, all, boss * k);
-                c.Floor[i] = floor; c.BM[i] = bm; c.Other[i] = other; c.FocIn[i] = focIn; c.Valid[i] = true;
+                bWaves[i] = waves; bMpw[i] = st.Mpw; bEffHP[i] = st.EffHp; bBoss[i] = boss; bK[i] = k;
+                bBCur[i] = WaveSim.BattleTime(waves, st.Mpw, st.EffHp * k, all, boss * k);
+                bFloor[i] = floor; bBM[i] = bm; bParts[i] = parts; bValid[i] = true;
             }
-            _optCtx = c; _optFocused = focused; _liveStats.TryGetValue(focused, out _optLive);
-            if (_optLive == null) return;
-            // greedy over each socket of the focused hero
-            for (int pass = 0; pass < 3; pass++)
+            // optimise each hero that fights in at least one stage
+            foreach (int h in _heroes)
             {
-                bool improved = false;
+                _liveStats.TryGetValue(h, out _optLive); if (_optLive == null) continue;
+                bool any = false; for (int i = 0; i < n; i++) if (bValid[i] && bParts[i].Contains(h)) { any = true; break; }
+                if (!any) continue;
+                var c = new OptCtx { N = n, Waves = bWaves, Mpw = bMpw, EffHP = bEffHP, Boss = bBoss, K = bK, BCur = bBCur, Floor = bFloor, BM = bBM, Other = new List<AtkStream>[n], FocIn = new bool[n], Valid = bValid };
+                for (int i = 0; i < n; i++)
+                {
+                    if (!bValid[i]) continue;
+                    var other = new List<AtkStream>(); bool fin = false;
+                    foreach (int p in bParts[i]) { if (p == h) fin = true; else if (curBy.TryGetValue(p, out var cs)) other.AddRange(cs); }
+                    c.Other[i] = other; c.FocIn[i] = fin;
+                }
+                _optCtx = c; _optFocused = h;
+                for (int pass = 0; pass < 3; pass++)
+                {
+                    bool improved = false;
+                    for (int s = 0; s < SlotParts.Length; s++)
+                    {
+                        var cc = SlotSockets(h, s); int sn = cc[0] + cc[1] + cc[2];
+                        if (sn <= 0) continue;
+                        string gg = SlotGroup(h, s);
+                        for (int pos = 0; pos < sn; pos++)
+                        {
+                            char type = pos < cc[0] ? 'D' : (pos < cc[0] + cc[1] ? 'E' : 'I');
+                            int startKey = GetSocket(h, s, pos);
+                            double bestScore = OptEvalTotal(); int bestKey = startKey;
+                            foreach (int mk in OptMats(type, gg))
+                            {
+                                SetSocketFor(h, s, pos, mk);
+                                double sc = OptEvalTotal();
+                                if (sc < bestScore - 1e-4) { bestScore = sc; bestKey = mk; }
+                            }
+                            SetSocketFor(h, s, pos, bestKey);
+                            if (bestKey != startKey) improved = true;
+                        }
+                    }
+                    if (!improved) break;
+                }
+                // record this hero's chosen materials (a positive key = the optimiser put a material there)
                 for (int s = 0; s < SlotParts.Length; s++)
                 {
-                    var cc = SlotSockets(focused, s); int sn = cc[0] + cc[1] + cc[2];
+                    var cc = SlotSockets(h, s); int sn = cc[0] + cc[1] + cc[2];
                     if (sn <= 0) continue;
-                    string gg = SlotGroup(focused, s);
+                    string gg = SlotGroup(h, s);
                     for (int pos = 0; pos < sn; pos++)
                     {
-                        char type = pos < cc[0] ? 'D' : (pos < cc[0] + cc[1] ? 'E' : 'I');
-                        int startKey = GetSocket(focused, s, pos);
-                        double bestScore = OptEvalTotal(); int bestKey = startKey;
-                        foreach (int mk in OptMats(type, gg))
-                        {
-                            SetSocket(s, pos, mk);
-                            double sc = OptEvalTotal();
-                            if (sc < bestScore - 1e-4) { bestScore = sc; bestKey = mk; }
-                        }
-                        SetSocket(s, pos, bestKey);
-                        if (bestKey != startKey) improved = true;
+                        int key = GetSocket(h, s, pos);
+                        if (key >= 1) _optLog.Add(new OptChange { Hero = h, Slot = s, Pos = pos, MatKey = key, Type = pos < cc[0] ? 'D' : (pos < cc[0] + cc[1] ? 'E' : 'I'), Gg = gg });
                     }
                 }
-                if (!improved) break;
             }
             _simHash = -1; _optFlash = 90;
+        }
+
+        // left changelog panel: what 最佳化 put in each socket (icon for deco/engrave, ◆ for inscription, +
+        // slot·type + stat range), grouped by hero. Drawn to the LEFT of the base panel (same GUI matrix).
+        private void DrawOptLog(float lh)
+        {
+            if (_optLog.Count == 0) return;
+            float gap = 6f, w = OptW, px = _rect.x - w - gap, py = _rect.y, h = _rect.height;
+            GUI.Box(new Rect(px, py, w, h), GUIContent.none, _box); PanelBorder.Draw(new Rect(px, py, w, h));
+            float ix = px + Pad, iw = w - Pad * 2, cy = py + Pad, botY = py + h - Pad;
+            GUI.Label(new Rect(ix, cy, iw - 22, lh), $"<color=#9fb4cc>✦ {Loc.G("fit_opt")}·{Loc.G("fit_changes")}</color>", _label);
+            _optLogClose = new Rect(px + w - 24, cy - 1, 20, lh); GUI.Button(_optLogClose, "✕", _btn);
+            cy += lh + 2;
+            int lastHero = -1;
+            foreach (var ch in _optLog)
+            {
+                if (cy + lh > botY) break;   // clip overflow rather than spill past the panel
+                if (ch.Hero != lastHero)
+                {
+                    cy += 2; DrawRect(ix, cy + 1, 3, lh - 2, ClassColor(ch.Hero));
+                    GUI.Label(new Rect(ix + 8, cy, iw - 8, lh), $"<color=#eaf3ee>★ {HeroProbe.HeroName(ch.Hero)}</color>", _label);
+                    cy += lh; lastHero = ch.Hero;
+                }
+                var mm = MatCatalog.Get(ch.MatKey); if (mm == null) continue;
+                var e = mm.Effect(ch.Gg);
+                string tn = ch.Type == 'D' ? Loc.G("sock_deco") : (ch.Type == 'E' ? Loc.G("sock_engrave") : Loc.G("sock_inscribe"));
+                float icx = ix + 8;
+                if (ch.Type != 'I') { var tex = GearIconCache.Get(ch.MatKey); if (tex != null) GUI.DrawTexture(new Rect(icx, cy + 1, lh - 2, lh - 2), tex, ScaleMode.ScaleToFit); }
+                else GUI.Label(new Rect(icx, cy, 14, lh), "<color=#7fd0c2>◆</color>", _label);
+                float tx = icx + lh + 2;
+                GUI.Label(new Rect(tx, cy, ix + iw - tx, lh), $"<size=10><color=#7d8aa0>{SlotL(ch.Slot)}·{tn}</color>  <color=#eaf3ee>{StatL(e.Stat)} {StatValRange(e.Stat, e.Mod, mm.MinFor(ch.Gg), mm.MaxFor(ch.Gg))}</color></size>", _label);
+                cy += lh;
+            }
         }
 
         // cheap change-hash over the sandbox streams, so RecomputeSim only runs when an edit changes something.

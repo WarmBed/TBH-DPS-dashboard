@@ -79,6 +79,10 @@ namespace TbhDpsMeter
         public bool[] FocIn, Valid;
     }
 
+    /// <summary>One socket the optimizer changed: which hero/slot/position, the chosen material key, and the
+    /// socket type + gear-group needed to resolve its icon/name/effect for the changelog panel.</summary>
+    public class OptChange { public int Hero, Slot, Pos, MatKey; public char Type; public string Gg = ""; }
+
     /// <summary>Turns a hero's final combat stats + equipped skills into the per-attack streams the iterative
     /// WaveSim consumes. auto = attack·critMult every 1/AttackSpeed; skill = attack·critMult·coeff every
     /// (BASEATTACK_COUNT: N/AttackSpeed; COOLDOWN: max(0.1, baseCD·(1−CDR))). AoE skills hit AoeTargets.</summary>
