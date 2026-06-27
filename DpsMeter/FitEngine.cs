@@ -292,6 +292,20 @@ namespace TbhDpsMeter
         }
         public static double LoadoutDpsWith(int[] gear, Dictionary<int, List<GearStat>> socketLines)
             => DamageFormula.ExpectedDps(ToCombat(LoadoutStatsWith(gear, socketLines)));
+
+        // flat/percent split of gear + socket lines (for live-anchored stat display)
+        public static void LoadoutFP(int[] gear, Dictionary<int, List<GearStat>> socketLines, Dictionary<string, double> flat, Dictionary<string, double> pct)
+        {
+            var lines = new List<GearStat>();
+            if (gear != null)
+                for (int s = 0; s < gear.Length; s++)
+                {
+                    var g = GearDatabase.ByKey(gear[s]);
+                    if (g != null) lines.AddRange(g.Stats);
+                    if (socketLines != null && socketLines.TryGetValue(s, out var sl) && sl != null) lines.AddRange(sl);
+                }
+            StatAggregator.AggregateFP(lines, flat, pct);
+        }
     }
 
     /// <summary>Immutable store of each equipped item's REAL applied socket effects (read from the save's
@@ -345,6 +359,37 @@ namespace TbhDpsMeter
                 outp[k] = f * (1.0 + a / 1000.0) * m;
             }
             return outp;
+        }
+
+        /// <summary>Like <see cref="Aggregate"/> but keeps the FLAT sum and the PERCENT factor
+        /// (1 + ΣADD/1000)·Π(1+MUL/1000) SEPARATE per stat. Needed so a percent modifier on a stat the gear
+        /// gives no flat base for (e.g. AreaOfEffect — its base lives on the character) still scales the live
+        /// value instead of collapsing to 0×factor = 0.</summary>
+        public static void AggregateFP(IEnumerable<GearStat> stats, Dictionary<string, double> flat, Dictionary<string, double> pct)
+        {
+            var add = new Dictionary<string, double>();
+            var mul = new Dictionary<string, double>();
+            if (stats != null)
+                foreach (var s in stats)
+                {
+                    if (string.IsNullOrEmpty(s.Stat)) continue;
+                    switch (s.Mod)
+                    {
+                        case "ADDITIVE": add[s.Stat] = (add.TryGetValue(s.Stat, out var a) ? a : 0) + s.Value; break;
+                        case "MULTIPLICATIVE": mul[s.Stat] = (mul.TryGetValue(s.Stat, out var m) ? m : 1.0) * (1.0 + s.Value / 1000.0); break;
+                        default: flat[s.Stat] = (flat.TryGetValue(s.Stat, out var f) ? f : 0) + s.Value; break;
+                    }
+                }
+            var keys = new HashSet<string>(flat.Keys);
+            foreach (var k in add.Keys) keys.Add(k);
+            foreach (var k in mul.Keys) keys.Add(k);
+            foreach (var k in keys)
+            {
+                double a = add.TryGetValue(k, out var aa) ? aa : 0;
+                double m = mul.TryGetValue(k, out var mm) ? mm : 1.0;
+                pct[k] = (1.0 + a / 1000.0) * m;
+                if (!flat.ContainsKey(k)) flat[k] = 0;
+            }
         }
     }
 }

@@ -789,6 +789,17 @@ class Tests
         var socks = new System.Collections.Generic.Dictionary<int, int[]> { { 0, new int[] { 110001 } } };
         var aggS = FitCalc.LoadoutStats(gear, socks);
         Check("[fit] socket effect folds in (17×1.221=20.757)", aggS.ContainsKey("AttackDamage") && Near(aggS["AttackDamage"], 20.757, 0.01), aggS.ContainsKey("AttackDamage") ? aggS["AttackDamage"] : -1);
+
+        // flat/percent split: a percent-only stat (no flat base, the 範圍 case) keeps its factor instead of
+        // collapsing to 0. AreaOfEffect ADDITIVE 189 -> flat 0, pct 1.189 ; with live base 2.9 -> 2.9×1.189 = 3.448
+        var fpFlat = new System.Collections.Generic.Dictionary<string, double>();
+        var fpPct = new System.Collections.Generic.Dictionary<string, double>();
+        StatAggregator.AggregateFP(new System.Collections.Generic.List<GearStat> { new GearStat("AreaOfEffect", "ADDITIVE", 189) }, fpFlat, fpPct);
+        Check("[fit] FP percent-only flat = 0", fpFlat.ContainsKey("AreaOfEffect") && Near(fpFlat["AreaOfEffect"], 0), fpFlat.ContainsKey("AreaOfEffect") ? fpFlat["AreaOfEffect"] : -1);
+        Check("[fit] FP percent-only pct = 1.189", fpPct.ContainsKey("AreaOfEffect") && Near(fpPct["AreaOfEffect"], 1.189, 0.001), fpPct.ContainsKey("AreaOfEffect") ? fpPct["AreaOfEffect"] : -1);
+        // collapsed Aggregate would lose it (0 × 1.189 = 0) — this is the bug the FP split fixes
+        var collapsed = StatAggregator.Aggregate(new System.Collections.Generic.List<GearStat> { new GearStat("AreaOfEffect", "ADDITIVE", 189) });
+        Check("[fit] collapsed loses percent-only (=0)", Near(collapsed.ContainsKey("AreaOfEffect") ? collapsed["AreaOfEffect"] : 0, 0), collapsed.ContainsKey("AreaOfEffect") ? collapsed["AreaOfEffect"] : -1);
     }
 
     // ================= RunRetention (per-stage history) =================

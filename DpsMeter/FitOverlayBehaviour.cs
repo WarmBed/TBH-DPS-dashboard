@@ -84,6 +84,8 @@ namespace TbhDpsMeter
         private readonly List<Rect> _fitDelRects = new List<Rect>();    // per saved-fit "delete" hitboxes
         private readonly List<int> _fitIdx = new List<int>();           // parallel: store index per shown row
         private readonly List<RunRecord> _clearStages = new List<RunRecord>();   // latest run per farmed stage (built on Reload), for the live clear-time block
+        // flat/percent split of the orig + sandbox loadouts, for live-anchored stat display (set each frame in OnGUI)
+        private Dictionary<string, double> _fpFlatO, _fpPctO, _fpFlatN, _fpPctN;
         private float _savedFlash;      // frame counter for the "已儲存" toast
         private int _pickerPage;
         private string _pickGrade = "";  // active grade-filter chip in the picker ("" = all)
@@ -463,6 +465,19 @@ namespace TbhDpsMeter
             if (origA > 1e-6) return oDisp * (newA / origA);
             return oDisp + (newA - origA) / aggScale;
         }
+        // live-anchored display using the flat/percent split. Given live = (base + origFlat)·origPct, the new
+        // value is exactly  live·(newPct/origPct) + Δflat·newPct  — so a percent modifier scales the live base
+        // even when the gear flat base is 0 (the 範圍 case), while flat changes still add. aggScale converts the
+        // flat from aggregate units to display units (10 for ×10-stored percents, 1 for absolute values).
+        private double DispFP(double live, string stat, double aggScale)
+        {
+            double of = (_fpFlatO != null && _fpFlatO.TryGetValue(stat, out var a)) ? a : 0;
+            double op = (_fpPctO != null && _fpPctO.TryGetValue(stat, out var b)) ? b : 1.0;
+            double nf = (_fpFlatN != null && _fpFlatN.TryGetValue(stat, out var c)) ? c : 0;
+            double np = (_fpPctN != null && _fpPctN.TryGetValue(stat, out var d)) ? d : 1.0;
+            if (op <= 1e-9) op = 1.0; if (np <= 1e-9) np = 1.0;
+            return live * (np / op) + ((nf - of) / aggScale) * np;
+        }
         // gear-rarity hex (no leading '#') — same palette as the gear-score panel, one source of truth.
         private static string GradeHex(string grade) => GearScoreOverlayBehaviour.GradeColor(grade);
 
@@ -553,8 +568,11 @@ namespace TbhDpsMeter
                         if (ls.Count > 0) sbLines[s] = ls;
                     }
                 }
-                var agg = FitCalc.LoadoutStatsWith(gearArr, sbLines);
-                var origAgg = FitCalc.LoadoutStatsWith(origArr, origLines);
+                // flat/percent split so percent sockets on no-flat-base stats (e.g. 範圍) still scale the live value
+                _fpFlatO = new Dictionary<string, double>(); _fpPctO = new Dictionary<string, double>();
+                _fpFlatN = new Dictionary<string, double>(); _fpPctN = new Dictionary<string, double>();
+                FitCalc.LoadoutFP(origArr, origLines, _fpFlatO, _fpPctO);
+                FitCalc.LoadoutFP(gearArr, sbLines, _fpFlatN, _fpPctN);
                 double sbDps = FitCalc.LoadoutDpsWith(gearArr, sbLines);
                 double origDps = FitCalc.LoadoutDpsWith(origArr, origLines);
                 _liveStats.TryGetValue(hero, out var live);   // real character stats (anchor)
@@ -572,19 +590,21 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(ix + 128, cy, 60, lh), $"<size=10><color=#6b7280>{Loc.G("fit_new")}</color></size>", _dim);
                 GUI.Label(new Rect(ix + 190, cy, 46, lh), $"<size=10><color=#6b7280>{Loc.G("fit_diff")}</color></size>", _dim);
                 cy += lh * 0.72f;
-                double oAtk = Sv(live, "attack"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("attack"), oAtk, DispN(oAtk, Sv(origAgg, "AttackDamage"), Sv(agg, "AttackDamage"), 1), "0", "");
-                double oAsp = Sv(live, "aspd"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("aspd"), oAsp, DispN(oAsp, Sv(origAgg, "AttackSpeed"), Sv(agg, "AttackSpeed"), 1), "0.##", "");
-                double oCr = Sv(live, "critrate") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critrate"), oCr, DispN(oCr, Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance"), 10), "0.#", "%");
-                double oCd = Sv(live, "critdmg") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critdmg"), oCd, DispN(oCd, Sv(origAgg, "CriticalDamage"), Sv(agg, "CriticalDamage"), 10), "0", "%");
-                double oPh = Sv(live, "Phys%") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("PhysicalDamagePercent"), oPh, DispN(oPh, Sv(origAgg, "PhysicalDamagePercent"), Sv(agg, "PhysicalDamagePercent"), 10), "0.#", "%");
-                double oAoe = Sv(live, "AoE"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("AoE"), oAoe, DispN(oAoe, Sv(origAgg, "AreaOfEffect"), Sv(agg, "AreaOfEffect"), 1), "0.#", "");
-                double oMs = Sv(live, "mspd") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("mspd"), oMs, DispN(oMs, Sv(origAgg, "MovementSpeed"), Sv(agg, "MovementSpeed"), 1), "0", "");
-                double oCdr = Sv(live, "cdr") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("cdr"), oCdr, DispN(oCdr, Sv(origAgg, "CooldownReduction"), Sv(agg, "CooldownReduction"), 10), "0.#", "%");
+                double oAtk = Sv(live, "attack"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("attack"), oAtk, DispFP(oAtk, "AttackDamage", 1), "0", "");
+                double oAsp = Sv(live, "aspd"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("aspd"), oAsp, DispFP(oAsp, "AttackSpeed", 1), "0.##", "");
+                double oCr = Sv(live, "critrate") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critrate"), oCr, DispFP(oCr, "CriticalChance", 10), "0.#", "%");
+                double oCd = Sv(live, "critdmg") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critdmg"), oCd, DispFP(oCd, "CriticalDamage", 10), "0", "%");
+                double oPh = Sv(live, "Phys%") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("PhysicalDamagePercent"), oPh, DispFP(oPh, "PhysicalDamagePercent", 10), "0.#", "%");
+                double oAoe = Sv(live, "AoE"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("AoE"), oAoe, DispFP(oAoe, "AreaOfEffect", 1), "0.#", "");
+                double oMs = Sv(live, "mspd") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("mspd"), oMs, DispFP(oMs, "MovementSpeed", 1), "0", "");
+                double oCdr = Sv(live, "cdr") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("cdr"), oCdr, DispFP(oCdr, "CooldownReduction", 10), "0.#", "%");
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
-                // live clear-time prediction: party-DPS factor from this hero's change × its per-stage share
-                double msO = Sv(origAgg, "MovementSpeed"), msN = Sv(agg, "MovementSpeed");
-                cy = DrawClearRows(ix, cy, iw, lh, hero, ratio, msO > 0.0001 ? msN / msO : 1.0);
+                // live clear-time prediction: party-DPS factor from this hero's change × its per-stage share;
+                // idle time scales with the move-speed change (same display path as the 移速 row above)
+                double mspdLive = Sv(live, "mspd") * 100;
+                double speedMult = mspdLive > 0.0001 ? DispFP(mspdLive, "MovementSpeed", 1) / mspdLive : 1.0;
+                cy = DrawClearRows(ix, cy, iw, lh, hero, ratio, speedMult);
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
                 // gear slots (click a row to view its sockets below; 換 swaps the item)
