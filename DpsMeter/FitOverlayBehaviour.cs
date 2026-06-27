@@ -83,6 +83,18 @@ namespace TbhDpsMeter
         // TBH's 10-tier rarity ladder (ascending) + short CJK labels, for the picker's grade chips.
         private static readonly string[] GradeLadder = { "COMMON", "UNCOMMON", "RARE", "LEGENDARY", "IMMORTAL", "ARCANA", "BEYOND", "CELESTIAL", "DIVINE", "COSMIC" };
         private static string GradeL(string g) => Loc.G("grade_" + g.ToLowerInvariant());
+        // SaveGearReader emits affix stats as short Loc keys; map them to StatType enum names for aggregation/display
+        private static readonly Dictionary<string, string> Short2Enum = new Dictionary<string, string>
+        {
+            { "attack", "AttackDamage" }, { "aspd", "AttackSpeed" }, { "critrate", "CriticalChance" }, { "critdmg", "CriticalDamage" },
+            { "hp", "MaxHp" }, { "armor", "Armor" }, { "mspd", "MovementSpeed" }, { "AoE", "AreaOfEffect" }, { "cdr", "CooldownReduction" },
+            { "Multistrike", "Multistrike" }, { "ProjCount", "ProjectileCount" }, { "HpLeech", "HpLeech" }, { "HpRegen", "HpRegenPerSec" },
+            { "CastSpd", "CastSpeed" }, { "Phys%", "PhysicalDamagePercent" }, { "Fire%", "FireDamagePercent" }, { "Cold%", "ColdDamagePercent" },
+            { "Light%", "LightningDamagePercent" }, { "Chaos%", "ChaosDamagePercent" }, { "FireRes", "FireResistance" }, { "ColdRes", "ColdResistance" },
+            { "LightRes", "LightningResistance" }, { "ChaosRes", "ChaosResistance" }, { "Dodge", "DodgeChance" }, { "Block", "BlockChance" },
+            { "ProjDmg", "IncreaseProjectileDamage" }, { "MeleeDmg", "IncreaseMeleeDamage" }, { "AoEDmg", "IncreaseAreaOfEffectDamage" }, { "SummonDmg", "IncreaseSummonDamage" },
+        };
+        private static string Short2EnumName(string s) => (s != null && Short2Enum.TryGetValue(s, out var e)) ? e : (s ?? "");
 
         private Rect _closeRect, _resetRect, _backRect;
         private readonly List<Rect> _tabRects = new List<Rect>();
@@ -126,8 +138,8 @@ namespace TbhDpsMeter
         {
             _seenVersion = RunStore.Version;
             FitDataStore.Ensure();
-            _heroes.Clear(); _orig.Clear(); _load.Clear(); _measDps.Clear();
-            // current equipped gear per hero (ItemKey by slot0..slot9)
+            _heroes.Clear(); _orig.Clear(); _load.Clear(); _measDps.Clear(); _sockets.Clear(); RealSockets.Clear();
+            // current equipped gear per hero (ItemKey by slot0..slot9) + the item's REAL applied sockets
             try
             {
                 var party = SaveGearReader.ReadParty();
@@ -138,7 +150,23 @@ namespace TbhDpsMeter
                     {
                         if (g == null || string.IsNullOrEmpty(g.Slot) || !g.Slot.StartsWith("slot")) continue;
                         int si; if (!int.TryParse(g.Slot.Substring(4), out si)) continue;
-                        if (si >= 0 && si < arr.Length) arr[si] = g.ItemKey;
+                        if (si < 0 || si >= arr.Length) continue;
+                        arr[si] = g.ItemKey;
+                        // real applied socket effects (EnchantData), placed into the grade's socket cells in
+                        // deco → engrave → inscribe order (the save lists them grouped, with applied counts)
+                        var gt = GearDatabase.ByKey(g.ItemKey);
+                        var cnt = SocketDb.Counts(gt != null ? gt.Grade : "");
+                        int total = cnt[0] + cnt[1] + cnt[2];
+                        if (total > 0 && g.Affixes.Count > 0)
+                        {
+                            var cells = new GearStat[total];
+                            int dc = Math.Min(g.DecoCount, cnt[0]), ec = Math.Min(g.EngraveCount, cnt[1]), ic = Math.Min(g.InscribeCount, cnt[2]);
+                            int ai = 0;
+                            for (int j = 0; j < cnt[0]; j++) if (j < dc && ai < g.Affixes.Count) { cells[j] = new GearStat(Short2EnumName(g.Affixes[ai].Name), "FLAT", g.Affixes[ai].Value); ai++; }
+                            for (int j = 0; j < cnt[1]; j++) if (j < ec && ai < g.Affixes.Count) { cells[cnt[0] + j] = new GearStat(Short2EnumName(g.Affixes[ai].Name), "FLAT", g.Affixes[ai].Value); ai++; }
+                            for (int j = 0; j < cnt[2]; j++) if (j < ic && ai < g.Affixes.Count) { cells[cnt[0] + cnt[1] + j] = new GearStat(Short2EnumName(g.Affixes[ai].Name), "FLAT", g.Affixes[ai].Value); ai++; }
+                            RealSockets.Set(kv.Key, si, cells);
+                        }
                     }
                     _orig[kv.Key] = arr;
                     var copy = new int[arr.Length]; Array.Copy(arr, copy, arr.Length); _load[kv.Key] = copy;
@@ -192,7 +220,8 @@ namespace TbhDpsMeter
             var cc = SlotSockets(h, slot); int total = cc[0] + cc[1] + cc[2];
             if (total <= 0) return;
             var d = SockOf(h);
-            if (!d.TryGetValue(slot, out var a) || a == null || a.Length != total) { a = new int[total]; d[slot] = a; }
+            if (!d.TryGetValue(slot, out var a) || a == null || a.Length != total)
+            { a = new int[total]; for (int i = 0; i < total; i++) a[i] = -1; d[slot] = a; }   // -1 = unedited (use real)
             if (pos >= 0 && pos < a.Length) a[pos] = matKey;
         }
         // gear group (WEAPON/ARMOR/ACCESSORY) of the item in a slot — selects which socket effect applies
@@ -402,13 +431,36 @@ namespace TbhDpsMeter
                 }
                 cy += lh + 2;
 
-                // computed stats (sandbox gear + sockets) + anchored DPS
+                // computed stats (sandbox gear + effective sockets) + anchored DPS.
+                // baseline (orig) = real items + their REAL applied sockets; sandbox = edited cells, else real.
                 _load.TryGetValue(hero, out var gearArr);
-                _sockets.TryGetValue(hero, out var sockMap);
-                var agg = FitCalc.LoadoutStats(gearArr, sockMap);
-                double sbDps = FitCalc.LoadoutDps(gearArr, sockMap);
                 _orig.TryGetValue(hero, out var origArr);
-                double origDps = FitCalc.LoadoutDps(origArr, null);
+                _sockets.TryGetValue(hero, out var hsock);
+                var sbLines = new Dictionary<int, List<GearStat>>();
+                var origLines = new Dictionary<int, List<GearStat>>();
+                for (int s = 0; s < SlotParts.Length; s++)
+                {
+                    var realO = RealSockets.Get(hero, s);
+                    if (realO != null)
+                    {
+                        var lo = new List<GearStat>();
+                        foreach (var c in realO) if (!string.IsNullOrEmpty(c.Stat)) lo.Add(c);
+                        if (lo.Count > 0) origLines[s] = lo;
+                    }
+                    bool unchanged = origArr != null && gearArr != null && s < origArr.Length && s < gearArr.Length && origArr[s] == gearArr[s];
+                    int[] edited = (hsock != null && hsock.TryGetValue(s, out var ea)) ? ea : null;
+                    string gg = SlotGroup(hero, s);
+                    var scc = SlotSockets(hero, s); int n = scc[0] + scc[1] + scc[2];
+                    if (n > 0)
+                    {
+                        var ls = new List<GearStat>();
+                        for (int p = 0; p < n; p++) { var e = FitCalc.EffectiveCell(realO, edited, p, gg, unchanged); if (!string.IsNullOrEmpty(e.Stat)) ls.Add(e); }
+                        if (ls.Count > 0) sbLines[s] = ls;
+                    }
+                }
+                var agg = FitCalc.LoadoutStatsWith(gearArr, sbLines);
+                double sbDps = FitCalc.LoadoutDpsWith(gearArr, sbLines);
+                double origDps = FitCalc.LoadoutDpsWith(origArr, origLines);
                 double meas; _measDps.TryGetValue(hero, out meas);
                 double ratio = origDps > 0 ? sbDps / origDps : 1.0;
                 double shownDps = meas > 0 ? meas * ratio : sbDps;
@@ -464,6 +516,10 @@ namespace TbhDpsMeter
                 }
                 else
                 {
+                    // effective effect per cell: edited material wins, else the item's REAL applied effect
+                    bool fUnchanged = origArr != null && gearArr != null && _focus < origArr.Length && _focus < gearArr.Length && origArr[_focus] == gearArr[_focus];
+                    var fReal = RealSockets.Get(hero, _focus);
+                    int[] fEdited = (hsock != null && hsock.TryGetValue(_focus, out var fea)) ? fea : null;
                     string[] tk = { "sock_deco", "sock_engrave", "sock_inscribe" };
                     int pos = 0;
                     for (int ti = 0; ti < 3; ti++)
@@ -472,10 +528,12 @@ namespace TbhDpsMeter
                         GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9aa3b0>{Loc.G(tk[ti])} ×{cc[ti]}</color>", _dim); cy += lh;
                         for (int j = 0; j < cc[ti]; j++)
                         {
-                            int mk = GetSocket(hero, _focus, pos);
+                            var eff = FitCalc.EffectiveCell(fReal, fEdited, pos, fgg, fUnchanged);
+                            bool filled = !string.IsNullOrEmpty(eff.Stat);
+                            string txt = filled ? $"<color=#bcd0ea>{StatL(eff.Stat)} {StatVal(eff.Stat, eff.Mod, eff.Value)}</color>" : $"<color=#67707d>{Loc.G("sock_empty")}</color>";
                             var cell = new Rect(ix + 12, cy, iw - 12, lh - 1);
-                            DrawRect(cell.x, cell.y, cell.width, cell.height, mk != 0 ? new Color(0.25f, 0.42f, 0.40f, 0.22f) : new Color(1, 1, 1, 0.04f));
-                            GUI.Label(new Rect(ix + 18, cy, iw - 24, lh), $"<size=11>◇ {SockEffect(mk, fgg)}</size>", _label);
+                            DrawRect(cell.x, cell.y, cell.width, cell.height, filled ? new Color(0.25f, 0.42f, 0.40f, 0.22f) : new Color(1, 1, 1, 0.04f));
+                            GUI.Label(new Rect(ix + 18, cy, iw - 24, lh), $"<size=11>◇ {txt}</size>", _label);
                             _sockRects.Add(cell); _sockPosList.Add(pos);
                             pos++; cy += lh;
                         }

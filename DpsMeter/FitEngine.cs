@@ -226,6 +226,51 @@ namespace TbhDpsMeter
 
         public static double LoadoutDps(int[] gearBySlot, Dictionary<int, int[]> sockets)
             => DamageFormula.ExpectedDps(ToCombat(LoadoutStats(gearBySlot, sockets)));
+
+        /// <summary>The effective effect of one socket cell: an edited material wins (sentinel -1 = not edited,
+        /// 0 = edited-empty); otherwise the item's REAL applied effect (when allowReal). Empty -> Stat=="".</summary>
+        public static GearStat EffectiveCell(GearStat[] real, int[] edited, int pos, string gg, bool allowReal)
+        {
+            if (edited != null && pos >= 0 && pos < edited.Length && edited[pos] != -1)
+            {
+                int mk = edited[pos];
+                if (mk == 0) return default;
+                var m = MatCatalog.Get(mk);
+                return (m != null && m.HasFor(gg)) ? m.Effect(gg) : default;
+            }
+            return (allowReal && real != null && pos >= 0 && pos < real.Length) ? real[pos] : default;
+        }
+
+        // aggregate gear + ready-made per-slot socket effect lines (caller resolves real-vs-edited)
+        public static Dictionary<string, double> LoadoutStatsWith(int[] gear, Dictionary<int, List<GearStat>> socketLines)
+        {
+            var lines = new List<GearStat>();
+            if (gear != null)
+                for (int s = 0; s < gear.Length; s++)
+                {
+                    var g = GearDatabase.ByKey(gear[s]);
+                    if (g != null) lines.AddRange(g.Stats);
+                    if (socketLines != null && socketLines.TryGetValue(s, out var sl) && sl != null) lines.AddRange(sl);
+                }
+            return StatAggregator.Aggregate(lines);
+        }
+        public static double LoadoutDpsWith(int[] gear, Dictionary<int, List<GearStat>> socketLines)
+            => DamageFormula.ExpectedDps(ToCombat(LoadoutStatsWith(gear, socketLines)));
+    }
+
+    /// <summary>Immutable store of each equipped item's REAL applied socket effects (read from the save's
+    /// EnchantData), positioned by socket cell. Kept out of the injected MonoBehaviour so GearStat never
+    /// appears in its field/method layout.</summary>
+    public static class RealSockets
+    {
+        private static readonly Dictionary<int, Dictionary<int, GearStat[]>> _d = new Dictionary<int, Dictionary<int, GearStat[]>>();
+        public static void Clear() => _d.Clear();
+        public static void Set(int hero, int slot, GearStat[] cells)
+        {
+            if (!_d.TryGetValue(hero, out var m)) { m = new Dictionary<int, GearStat[]>(); _d[hero] = m; }
+            m[slot] = cells;
+        }
+        public static GearStat[] Get(int hero, int slot) => (_d.TryGetValue(hero, out var m) && m.TryGetValue(slot, out var c)) ? c : null;
     }
 
     /// <summary>Aggregates a set of gear/material stat lines into a per-StatType total, PoE-style:
