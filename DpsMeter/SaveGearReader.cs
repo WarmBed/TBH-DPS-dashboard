@@ -333,6 +333,14 @@ namespace TbhDpsMeter
             {16,"Dodge"}, {17,"Block"}, {20,"Multistrike"}, {21,"HpLeech"}, {22,"ProjCount"}, {23,"HpRegen"},
             {24,"Phys%"}, {25,"Fire%"}, {26,"Cold%"}, {27,"Light%"}, {28,"Chaos%"},
             {49,"CastSpd"}, {53,"ProjDmg"}, {54,"MeleeDmg"}, {55,"AoEDmg"}, {56,"SummonDmg"},
+            // remaining StatType enum values (verified against TaskbarHero.StatType); enum-name keys are localized.
+            {9,"BaseAttackCountReduction"}, {11,"SkillRangeExpansion"}, {18,"MaxDodgeChance"}, {19,"MaxBlockChance"},
+            {29,"MaxFireResistance"}, {30,"MaxColdResistance"}, {31,"MaxLightningResistance"}, {32,"MaxChaosResistance"},
+            {33,"AddHpPerHit"}, {34,"DamageReduction"}, {35,"PhysicalDamageReduction"}, {36,"FireDamageReduction"},
+            {37,"ColdDamageReduction"}, {38,"LightningDamageReduction"}, {39,"ChaosDamageReduction"}, {40,"DamageAbsorption"},
+            {41,"DamageAddition"}, {42,"PhysicalDamageAddition"}, {43,"FireDamageAddition"}, {44,"ColdDamageAddition"},
+            {45,"LightningDamageAddition"}, {46,"ChaosDamageAddition"}, {47,"IncreaseExpAmount"}, {48,"AdditionalExp"},
+            {50,"SkillHealIncrease"}, {51,"SkillDurationIncrease"}, {52,"AllElementalResistance"},
         };
 
         private static string StatName(int st) => StatNames.TryGetValue(st, out var n) ? n : "stat" + st;

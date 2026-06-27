@@ -667,7 +667,7 @@ namespace TbhDpsMeter
                 foreach (var mm in list) if ("T" + mm.TierFor(gearGroup) == _pickGrade) f.Add(mm);
                 list = f;
             }
-            int per = 6; float rowH = lh * 1.5f;
+            int per = 6; float rowH = lh * 1.95f, iconSz = lh * 1.55f;
             int pages = Mathf.Max(1, (list.Count + per - 1) / per);
             _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
             int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
@@ -683,8 +683,13 @@ namespace TbhDpsMeter
             {
                 var mm = list[start + i]; var e = mm.Effect(gearGroup);
                 var r = new Rect(ix, cy, iw, rowH - 1); if ((i & 1) == 1) DrawRect(ix, cy, iw, rowH, new Color(1, 1, 1, 0.03f));
-                GUI.Label(new Rect(ix + 6, cy, iw - 10, lh), $"<color=#eaf3ee>{StatL(e.Stat)} {StatVal(e.Stat, e.Mod, e.Value)}</color> <size=9><color=#8a93a0>T{mm.TierFor(gearGroup)}</color></size>", _label);
-                GUI.Label(new Rect(ix + 12, cy + lh - 3, iw - 16, lh), $"<size=10><color=#7c8696>{Nm(mm.Key)}</color></size>", _tiny);
+                var tex = GearIconCache.Get(mm.Key);
+                var iconR = new Rect(ix + 3, cy + (rowH - iconSz) * 0.5f, iconSz, iconSz);
+                if (tex != null) GUI.DrawTexture(iconR, tex, ScaleMode.ScaleToFit);
+                else { var pc = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconR, _white); GUI.color = pc; }
+                float tx = ix + iconSz + 8, tw = iw - iconSz - 12;
+                GUI.Label(new Rect(tx, cy + 2, tw, lh), $"<color=#eaf3ee>{StatL(e.Stat)} {StatVal(e.Stat, e.Mod, e.Value)}</color> <size=10><color=#8a93a0>T{mm.TierFor(gearGroup)}</color></size>", _label);
+                GUI.Label(new Rect(tx, cy + lh, tw, lh), $"<color=#9aa3b0>{Nm(mm.Key)}</color>", _dim);
                 _pickRects.Add(r); _pickKeys.Add(mm.Key); cy += rowH;
             }
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
