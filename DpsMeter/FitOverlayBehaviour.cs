@@ -175,10 +175,12 @@ namespace TbhDpsMeter
                         {
                             var cells = new GearStat[total];
                             int dc = Math.Min(g.DecoCount, cnt[0]), ec = Math.Min(g.EngraveCount, cnt[1]), ic = Math.Min(g.InscribeCount, cnt[2]);
-                            int ai = 0;
-                            for (int j = 0; j < cnt[0]; j++) if (j < dc && ai < g.Affixes.Count) { cells[j] = new GearStat(Short2EnumName(g.Affixes[ai].Name), "FLAT", g.Affixes[ai].Value); ai++; }
-                            for (int j = 0; j < cnt[1]; j++) if (j < ec && ai < g.Affixes.Count) { cells[cnt[0] + j] = new GearStat(Short2EnumName(g.Affixes[ai].Name), "FLAT", g.Affixes[ai].Value); ai++; }
-                            for (int j = 0; j < cnt[2]; j++) if (j < ic && ai < g.Affixes.Count) { cells[cnt[0] + cnt[1] + j] = new GearStat(Short2EnumName(g.Affixes[ai].Name), "FLAT", g.Affixes[ai].Value); ai++; }
+                            string gg = gt.GearGroup; int ai = 0;
+                            // EnchantData has stat+value but NO mod — recover it from the catalog (so AttackDamage
+                            // 150 reads as +15% ADDITIVE, not +150 FLAT)
+                            for (int j = 0; j < cnt[0]; j++) if (j < dc && ai < g.Affixes.Count) { string nm = Short2EnumName(g.Affixes[ai].Name); double vv = g.Affixes[ai].Value; cells[j] = new GearStat(nm, MatCatalog.MatchMod('D', gg, nm, vv), vv); ai++; }
+                            for (int j = 0; j < cnt[1]; j++) if (j < ec && ai < g.Affixes.Count) { string nm = Short2EnumName(g.Affixes[ai].Name); double vv = g.Affixes[ai].Value; cells[cnt[0] + j] = new GearStat(nm, MatCatalog.MatchMod('E', gg, nm, vv), vv); ai++; }
+                            for (int j = 0; j < cnt[2]; j++) if (j < ic && ai < g.Affixes.Count) { string nm = Short2EnumName(g.Affixes[ai].Name); double vv = g.Affixes[ai].Value; cells[cnt[0] + cnt[1] + j] = new GearStat(nm, MatCatalog.MatchMod('I', gg, nm, vv), vv); ai++; }
                             RealSockets.Set(kv.Key, si, cells);
                         }
                     }

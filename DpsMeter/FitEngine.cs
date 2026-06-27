@@ -168,6 +168,22 @@ namespace TbhDpsMeter
                 if (m.HasFor(gearGroup)) { var e = m.Effect(gearGroup); if (e.Stat == stat && e.Mod == mod) return m.Key; }
             return 0;
         }
+        /// <summary>The MOD a socket grants for a stat on a gear group — recovered for a REAL applied effect
+        /// (the save's EnchantData has the value but not the mod) by matching the closest-value material of
+        /// that socket type. Falls back to "FLAT".</summary>
+        public static string MatchMod(char type, string gearGroup, string stat, double value)
+        {
+            string best = "FLAT"; double bestDiff = double.MaxValue;
+            foreach (var m in ByType(type))
+                if (m.HasFor(gearGroup))
+                {
+                    var e = m.Effect(gearGroup);
+                    if (e.Stat != stat) continue;
+                    double d = System.Math.Abs(e.Value - value);
+                    if (d < bestDiff) { bestDiff = d; best = e.Mod; }
+                }
+            return best;
+        }
     }
 
     /// <summary>High-level fitting helpers: turn a loadout (the equipped item keys) into aggregated stats,
