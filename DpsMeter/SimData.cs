@@ -79,7 +79,6 @@ namespace TbhDpsMeter
         {
             var streams = new List<AtkStream>();
             if (attack <= 0 || aspd <= 0) return streams;
-            double crit = 1.0 + critRate * (critDmg - 1.0);
             int baseKey = (heroKey / 100) * 10000 + 1;   // 201→20001, 301→30001, …  (implicit base attack)
             bool baseInList = false;
             if (skillKeys != null)
@@ -87,13 +86,13 @@ namespace TbhDpsMeter
                 {
                     if (skillKeys[i] == baseKey) baseInList = true;
                     int lvl = (skillLevels != null && i < skillLevels.Count) ? skillLevels[i] : 1;
-                    Add(streams, skillKeys[i], lvl, attack, crit, aspd, cdr);
+                    Add(streams, skillKeys[i], lvl, attack, critRate, critDmg, aspd, cdr);
                 }
-            if (!baseInList) Add(streams, baseKey, 1, attack, crit, aspd, cdr);
+            if (!baseInList) Add(streams, baseKey, 1, attack, critRate, critDmg, aspd, cdr);
             return streams;
         }
 
-        static void Add(List<AtkStream> streams, int key, int lvl, double attack, double crit, double aspd, double cdr)
+        static void Add(List<AtkStream> streams, int key, int lvl, double attack, double critRate, double critDmg, double aspd, double cdr)
         {
             if (!SkillDb.TryGet(key, out var s)) return;
             double interval;
@@ -102,7 +101,15 @@ namespace TbhDpsMeter
             else if (s.Act == 2) interval = s.Av > 0 ? Math.Max(0.1, s.Av * (1.0 - cdr)) : 0;
             else return;
             if (interval <= 0) return;
-            streams.Add(new AtkStream(attack * crit * s.Coeff(lvl), interval, s.Aoe ? AoeTargets : 1));
+            int targets = s.Aoe ? AoeTargets : 1;
+            double coeff = s.Coeff(lvl);
+            // Split crit vs non-crit so OVERKILL is judged per hit-type, not on the average. A normal (non-crit)
+            // hit = attack·coeff lands (1−critRate) of the time; a crit = attack·critDmg·coeff lands critRate of
+            // the time. Total hit rate is preserved (=1/interval). If the non-crit hit already one-shots, more
+            // crit is pure overkill and dropping crit rate costs nothing — which is exactly what the user expects.
+            double cr = critRate < 0 ? 0 : (critRate > 1 ? 1 : critRate);
+            if (1 - cr > 0.001) streams.Add(new AtkStream(attack * coeff, interval / (1 - cr), targets));
+            if (cr > 0.001) streams.Add(new AtkStream(attack * critDmg * coeff, interval / cr, targets));
         }
 
         /// <summary>Binary-search the effHP scale k so the iterative sim reproduces a measured clear with the
