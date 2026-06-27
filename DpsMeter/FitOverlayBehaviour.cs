@@ -382,6 +382,27 @@ namespace TbhDpsMeter
             _stylesReady = true;
         }
         private void DrawRect(float x, float y, float w, float h, Color c) { var p = GUI.color; GUI.color = c; GUI.DrawTexture(new Rect(x, y, w, h), _white); GUI.color = p; }
+        // one stat-comparison row: name | original → new (+Δ%) | rightward bar (green = gain, red = loss).
+        private float StatBarRow(float x, float y, float w, float lh, string label, double o, double n, string fmt, string suffix)
+        {
+            GUI.Label(new Rect(x, y, 50, lh), $"<color=#9fb4cc>{label}</color>", _dim);
+            bool up = n > o + Math.Abs(o) * 5e-4 + 1e-9, down = n < o - Math.Abs(o) * 5e-4 - 1e-9;
+            string nc = up ? "#7fffa0" : (down ? "#ff8a8a" : "#cdd5df");
+            string delta = (up || down) && o != 0 ? $" <size=10><color={nc}>{((n - o) / Math.Abs(o) * 100 >= 0 ? "+" : "")}{(n - o) / Math.Abs(o) * 100:0.#}%</color></size>" : "";
+            GUI.Label(new Rect(x + 52, y, 156, lh), $"<color=#8a93a0>{o.ToString(fmt)}{suffix}</color> <color=#6b7280>→</color> <color={nc}>{n.ToString(fmt)}{suffix}</color>{delta}", _dim);
+            float bx = x + 214, bw = w - 214, by = y + lh * 0.34f, bh = lh * 0.34f;
+            if (bw > 24)
+            {
+                DrawRect(bx, by, bw, bh, new Color(1, 1, 1, 0.05f));   // track
+                double maxS = Math.Max(Math.Max(Math.Abs(o), Math.Abs(n)), 1e-9);
+                float oF = Mathf.Clamp01((float)(o / maxS)), nF = Mathf.Clamp01((float)(n / maxS));
+                DrawRect(bx, by, bw * Math.Min(oF, nF), bh, new Color(0.45f, 0.50f, 0.58f, 0.6f));   // shared base
+                if (up) DrawRect(bx + bw * oF, by, bw * (nF - oF), bh, new Color(0.40f, 0.85f, 0.50f, 0.92f));   // gain
+                else if (down) DrawRect(bx + bw * nF, by, bw * (oF - nF), bh, new Color(0.90f, 0.42f, 0.42f, 0.92f)); // loss
+                DrawRect(bx + bw * oF - 1f, y + lh * 0.24f, 1.5f, lh * 0.54f, new Color(1, 1, 1, 0.5f));   // original tick
+            }
+            return y + lh;
+        }
         private static Color ClassColor(int heroKey)
         {
             switch (heroKey / 100) { case 1: return new Color(0.90f, 0.78f, 0.35f); case 2: return new Color(0.40f, 0.86f, 0.46f); case 3: return new Color(0.55f, 0.60f, 0.97f); case 4: return new Color(0.95f, 0.62f, 0.40f); }
@@ -425,7 +446,7 @@ namespace TbhDpsMeter
                 int[] sc0 = SlotSockets(CurHero, _focus);
                 int typesShown = (sc0[0] > 0 ? 1 : 0) + (sc0[1] > 0 ? 1 : 0) + (sc0[2] > 0 ? 1 : 0);
                 int sockRows = Mathf.Max(2, 1 + typesShown + sc0[0] + sc0[1] + sc0[2]);
-                int mainRows = 3 + 1 + SlotParts.Length + 1 + sockRows;
+                int mainRows = 8 + 1 + SlotParts.Length + 1 + sockRows;   // DPS + 7 comparison bars + gear + sockets
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
@@ -502,19 +523,18 @@ namespace TbhDpsMeter
                 double ratio = origDps > 0 ? sbDps / origDps : 1.0;
                 double shownDps = meas > 0 ? meas * ratio : sbDps;
 
-                // game 屬性-panel display scaling: % stats ×100, move speed ×100; attack/aspd as-is
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("attack")}</color> <color=#eaf3ee>{Shown(Sv(live, "attack"), Sv(origAgg, "AttackDamage"), Sv(agg, "AttackDamage")):0}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("aspd")}</color> <color=#eaf3ee>{Shown(Sv(live, "aspd"), Sv(origAgg, "AttackSpeed"), Sv(agg, "AttackSpeed")):0.##}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("critrate")}</color> <color=#eaf3ee>{Shown(Sv(live, "critrate"), Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance")) * 100:0.#}%</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("critdmg")}</color> <color=#eaf3ee>{Shown(Sv(live, "critdmg"), Sv(origAgg, "CriticalDamage"), Sv(agg, "CriticalDamage")) * 100:0}%</color>", _dim); cy += lh;
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("AoE")}</color> <color=#eaf3ee>{Shown(Sv(live, "AoE"), Sv(origAgg, "AreaOfEffect"), Sv(agg, "AreaOfEffect")):0.#}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("mspd")}</color> <color=#eaf3ee>{Shown(Sv(live, "mspd"), Sv(origAgg, "MovementSpeed"), Sv(agg, "MovementSpeed")) * 100:0}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("cdr")}</color> <color=#eaf3ee>{Shown(Sv(live, "cdr"), Sv(origAgg, "CooldownReduction"), Sv(agg, "CooldownReduction")) * 100:0.#}%</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("Multistrike")}</color> <color=#eaf3ee>{Shown(Sv(live, "Multistrike"), Sv(origAgg, "Multistrike"), Sv(agg, "Multistrike")):0.#}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("ProjCount")}</color> <color=#eaf3ee>{Shown(Sv(live, "ProjCount"), Sv(origAgg, "ProjectileCount"), Sv(agg, "ProjectileCount")):0.#}</color>", _dim); cy += lh;
+                // DPS (prominent) + a before→after comparison list with rightward difference bars.
+                // O = the real current value (anchor); N = the value after the sandbox edits.
                 string rc = ratio > 1.001 ? "#7fffa0" : (ratio < 0.999 ? "#ff8a8a" : "#cdd5df");
                 GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_dps")}</color> <color=#eaf3ee><b>{FmtNum(shownDps)}</b></color>  " +
                     $"<color={rc}>(×{ratio:0.000} {Loc.G("fit_vs")})</color>   <size=10><color=#8a93a0>{Loc.G("fit_approx")}</color></size>", _label); cy += lh;
+                cy = StatBarRow(ix, cy, iw, lh, Loc.G("attack"), Sv(live, "attack"), Shown(Sv(live, "attack"), Sv(origAgg, "AttackDamage"), Sv(agg, "AttackDamage")), "0", "");
+                cy = StatBarRow(ix, cy, iw, lh, Loc.G("aspd"), Sv(live, "aspd"), Shown(Sv(live, "aspd"), Sv(origAgg, "AttackSpeed"), Sv(agg, "AttackSpeed")), "0.##", "");
+                cy = StatBarRow(ix, cy, iw, lh, Loc.G("critrate"), Sv(live, "critrate") * 100, Shown(Sv(live, "critrate"), Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance")) * 100, "0.#", "%");
+                cy = StatBarRow(ix, cy, iw, lh, Loc.G("critdmg"), Sv(live, "critdmg") * 100, Shown(Sv(live, "critdmg"), Sv(origAgg, "CriticalDamage"), Sv(agg, "CriticalDamage")) * 100, "0", "%");
+                cy = StatBarRow(ix, cy, iw, lh, Loc.G("AoE"), Sv(live, "AoE"), Shown(Sv(live, "AoE"), Sv(origAgg, "AreaOfEffect"), Sv(agg, "AreaOfEffect")), "0.#", "");
+                cy = StatBarRow(ix, cy, iw, lh, Loc.G("mspd"), Sv(live, "mspd") * 100, Shown(Sv(live, "mspd"), Sv(origAgg, "MovementSpeed"), Sv(agg, "MovementSpeed")) * 100, "0", "");
+                cy = StatBarRow(ix, cy, iw, lh, Loc.G("cdr"), Sv(live, "cdr") * 100, Shown(Sv(live, "cdr"), Sv(origAgg, "CooldownReduction"), Sv(agg, "CooldownReduction")) * 100, "0.#", "%");
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
                 // gear slots (click a row to view its sockets below; 換 swaps the item)
