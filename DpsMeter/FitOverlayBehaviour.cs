@@ -917,8 +917,14 @@ namespace TbhDpsMeter
                 int waves = wc > 0 ? System.Math.Min(wc, st.Waves) : st.Waves;
                 double bossHp = waves >= st.Waves ? st.BossHp : 0;
                 double k = StreamBuilder.CalibrateHpScale(waves, st.Mpw, st.EffHp, bossHp, curS, measured);
-                double pred = WaveSim.StageTime(waves, st.Mpw, st.EffHp * k, sbS, 0, 0, bossHp * k);
-                _simNew.Add(pred); _simFloor.Add(ClearTimeSim.FixedFloor(waves));
+                // show the sim RELATIVELY: new = measured × (sandbox sim ÷ current sim). With no edit the two
+                // sims are identical ⇒ ratio 1 ⇒ new == measured (no spurious change even when the calibration
+                // couldn't reach the measured time, e.g. a partial run below the spawn/cadence floor).
+                double predCur = WaveSim.StageTime(waves, st.Mpw, st.EffHp * k, curS, 0, 0, bossHp * k);
+                double predSb = WaveSim.StageTime(waves, st.Mpw, st.EffHp * k, sbS, 0, 0, bossHp * k);
+                bool ok = predCur > 0.01 && !double.IsInfinity(predCur) && !double.IsNaN(predSb) && !double.IsInfinity(predSb);
+                double newClear = ok ? measured * (predSb / predCur) : measured;
+                _simNew.Add(newClear); _simFloor.Add(ClearTimeSim.FixedFloor(waves));
             }
         }
 
