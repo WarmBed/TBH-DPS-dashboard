@@ -206,7 +206,7 @@ namespace TbhDpsMeter
         {
             var cc = SlotSockets(CurHero, slot);
             _sockType = pos < cc[0] ? 'D' : (pos < cc[0] + cc[1] ? 'E' : 'I');
-            _sockSlot = slot; _sockPos = pos; _picker = -1; _pickerPage = 0;
+            _sockSlot = slot; _sockPos = pos; _picker = -1; _pickerPage = 0; _pickGrade = "";
         }
 
         private void HandlePointer()
@@ -239,6 +239,8 @@ namespace TbhDpsMeter
                 if (_sockSlot >= 0)
                 {
                     if (_backRect.Contains(m)) { _sockSlot = -1; return; }
+                    for (int i = 0; i < _gradeRects.Count && i < _gradeKeys.Count; i++)
+                        if (_gradeRects[i].Contains(m)) { _pickGrade = _gradeKeys[i]; _pickerPage = 0; return; }
                     if (_ppPrev.Contains(m)) { _pickerPage = Mathf.Max(0, _pickerPage - 1); return; }
                     if (_ppNext.Contains(m)) { _pickerPage++; return; }
                     for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
@@ -363,7 +365,7 @@ namespace TbhDpsMeter
                 int typesShown = (sc0[0] > 0 ? 1 : 0) + (sc0[1] > 0 ? 1 : 0) + (sc0[2] > 0 ? 1 : 0);
                 int sockRows = Mathf.Max(2, 1 + typesShown + sc0[0] + sc0[1] + sc0[2]);
                 int mainRows = 3 + 1 + SlotParts.Length + 1 + sockRows;
-                int rows = sideOpen ? Mathf.Max(mainRows, 18) : mainRows;
+                int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
                 _scale = UiScale.Fit(_rect.width, _rect.height);
@@ -415,10 +417,11 @@ namespace TbhDpsMeter
                     $"<color=#9fb4cc>{Loc.G("aspd")}</color> <color=#eaf3ee>{Sv(agg, "AttackSpeed"):0.##}</color>   " +
                     $"<color=#9fb4cc>{Loc.G("critrate")}</color> <color=#eaf3ee>{Sv(agg, "CriticalChance"):0.#}</color>   " +
                     $"<color=#9fb4cc>{Loc.G("critdmg")}</color> <color=#eaf3ee>{Sv(agg, "CriticalDamage"):0.#}</color>", _dim); cy += lh;
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("AoE")}</color> <color=#eaf3ee>{Sv(agg, "AoE"):0}</color>   " +
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("AoE")}</color> <color=#eaf3ee>{Sv(agg, "AreaOfEffect"):0}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("mspd")}</color> <color=#eaf3ee>{Sv(agg, "MovementSpeed"):0.#}</color>   " +
                     $"<color=#9fb4cc>{Loc.G("cdr")}</color> <color=#eaf3ee>{Sv(agg, "CooldownReduction"):0}</color>   " +
                     $"<color=#9fb4cc>{Loc.G("Multistrike")}</color> <color=#eaf3ee>{Sv(agg, "Multistrike"):0}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("ProjCount")}</color> <color=#eaf3ee>{Sv(agg, "ProjCount"):0}</color>", _dim); cy += lh;
+                    $"<color=#9fb4cc>{Loc.G("ProjCount")}</color> <color=#eaf3ee>{Sv(agg, "ProjectileCount"):0}</color>", _dim); cy += lh;
                 string rc = ratio > 1.001 ? "#7fffa0" : (ratio < 0.999 ? "#ff8a8a" : "#cdd5df");
                 GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_dps")}</color> <color=#eaf3ee><b>{FmtNum(shownDps)}</b></color>  " +
                     $"<color={rc}>(×{ratio:0.000} {Loc.G("fit_vs")})</color>   <size=10><color=#8a93a0>{Loc.G("fit_approx")}</color></size>", _label); cy += lh;
@@ -537,34 +540,35 @@ namespace TbhDpsMeter
                 foreach (var g in list) if (g.Grade == _pickGrade) fg.Add(g);
                 list = fg;
             }
-            int per = 5; float rowH = lh * 2.6f;
+            int per = 4; float maxRowH = lh * 3.9f, iconSz = lh * 1.7f;
             int pages = Mathf.Max(1, (list.Count + per - 1) / per);
             _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
             int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
             _pickRects.Clear(); _pickKeys.Clear();
             int curKey = (_load.TryGetValue(hero, out var arr) && _picker < arr.Length) ? arr[_picker] : 0;
-            // the variant the hero actually owns in this slot (each item ships as 2 inherent-roll variants);
-            // mark it so the user can tell theirs apart from its twin.
+            // the variant the hero actually owns in this slot (each item ships as 2 inherent-roll variants).
             int ownedKey = (_orig.TryGetValue(hero, out var oa2) && _picker < oa2.Length) ? oa2[_picker] : 0;
             for (int i = 0; i < shown; i++)
             {
-                var g = list[start + i]; var r = new Rect(ix, cy, iw, rowH - 1);
-                bool cur = g.Key == curKey;
-                if (cur) DrawRect(ix, cy, iw, rowH, new Color(0.30f, 0.45f, 0.75f, 0.30f)); else if ((i & 1) == 1) DrawRect(ix, cy, iw, rowH, new Color(1, 1, 1, 0.03f));
-                // icon (fetched lazily from the wiki by ItemKey; faint placeholder until it resolves)
-                var iconR = new Rect(ix + 3, cy + 3, rowH - 6, rowH - 6);
-                var tex = GearIconCache.Get(g.Key);
-                if (tex != null) GUI.DrawTexture(iconR, tex, ScaleMode.ScaleToFit);
-                else { var pc = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconR, _white); GUI.color = pc; }
-                float tx = ix + rowH + 2;
-                // name in its grade colour at full size (✓ = the variant you own), stat summary beneath
+                var g = list[start + i];
                 string own = g.Key == ownedKey ? "<color=#7fffa0>✓</color> " : "";
                 string lvl = g.Level > 0 ? $" <size=10><color=#8a93a0>Lv{g.Level}</color></size>" : "";
-                GUI.Label(new Rect(tx, cy + 1, iw - rowH - 6, lh), $"{own}<color=#{GradeHex(g.Grade)}><b>{Nm(g.Key)}</b></color>{lvl}", _label);
+                string nameStr = $"{own}<color=#{GradeHex(g.Grade)}><b>{Nm(g.Key)}</b></color>{lvl}";
                 string stats = "";
                 foreach (var st in g.Stats) stats += $"{StatL(st.Stat)} {StatVal(st.Stat, st.Mod, st.Value)}　";
-                GUI.Label(new Rect(tx, cy + lh - 2, iw - rowH - 4, rowH - lh), $"<color=#9aa3b0>{stats}</color>", _wrap);
-                _pickRects.Add(r); _pickKeys.Add(g.Key); cy += rowH;
+                string statStr = $"<color=#9aa3b0>{stats}</color>";
+                float tx = ix + iconSz + 6, statW = iw - iconSz - 10;
+                float statH = _wrap.CalcHeight(new GUIContent(statStr), statW);
+                float thisH = Mathf.Clamp(lh + statH + 4, lh * 1.9f, maxRowH);   // size the row to its wrapped stats
+                bool cur = g.Key == curKey;
+                if (cur) DrawRect(ix, cy, iw, thisH, new Color(0.30f, 0.45f, 0.75f, 0.30f)); else if ((i & 1) == 1) DrawRect(ix, cy, iw, thisH, new Color(1, 1, 1, 0.03f));
+                var tex = GearIconCache.Get(g.Key);
+                var iconR = new Rect(ix + 3, cy + 3, iconSz, iconSz);
+                if (tex != null) GUI.DrawTexture(iconR, tex, ScaleMode.ScaleToFit);
+                else { var pc = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconR, _white); GUI.color = pc; }
+                GUI.Label(new Rect(tx, cy + 1, statW, lh), nameStr, _label);
+                GUI.Label(new Rect(tx, cy + lh - 1, statW, thisH - lh), statStr, _wrap);
+                _pickRects.Add(new Rect(ix, cy, iw, thisH - 1)); _pickKeys.Add(g.Key); cy += thisH;
             }
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
             GUI.Button(_ppPrev, "◀", _btn); GUI.Button(_ppNext, "▶", _btn);
@@ -581,7 +585,31 @@ namespace TbhDpsMeter
             var all = MatCatalog.ByType(_sockType);
             var list = new List<SockMat>();
             foreach (var mm in all) if (mm.HasFor(gearGroup)) list.Add(mm);
-            int per = 7; float rowH = lh * 1.5f;
+            // tier-filter chips (材料分品質)
+            var present = new HashSet<int>();
+            foreach (var mm in list) present.Add(mm.TierFor(gearGroup));
+            _gradeRects.Clear(); _gradeKeys.Clear();
+            float chx = ix, chy = cy, chh = lh - 1, cw = 42, gap = 3;
+            DrawRect(chx, chy, cw, chh, _pickGrade == "" ? new Color(0.30f, 0.45f, 0.75f, 0.50f) : new Color(1, 1, 1, 0.06f));
+            GUI.Label(new Rect(chx + 5, chy, cw, chh), Loc.G("fit_all"), _dim);
+            _gradeRects.Add(new Rect(chx, chy, cw, chh)); _gradeKeys.Add(""); chx += cw + gap;
+            for (int t = 1; t <= 12; t++)
+            {
+                if (!present.Contains(t)) continue;
+                if (chx + cw > ix + iw) { chx = ix; chy += chh + 2; }
+                string key = "T" + t; bool act = _pickGrade == key;
+                DrawRect(chx, chy, cw, chh, act ? new Color(0.30f, 0.45f, 0.75f, 0.50f) : new Color(1, 1, 1, 0.06f));
+                GUI.Label(new Rect(chx + 6, chy, cw, chh), $"<color=#bcd0ea>{key}</color>", _dim);
+                _gradeRects.Add(new Rect(chx, chy, cw, chh)); _gradeKeys.Add(key); chx += cw + gap;
+            }
+            cy = chy + chh + 3;
+            if (_pickGrade != "")
+            {
+                var f = new List<SockMat>();
+                foreach (var mm in list) if ("T" + mm.TierFor(gearGroup) == _pickGrade) f.Add(mm);
+                list = f;
+            }
+            int per = 6; float rowH = lh * 1.5f;
             int pages = Mathf.Max(1, (list.Count + per - 1) / per);
             _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
             int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
