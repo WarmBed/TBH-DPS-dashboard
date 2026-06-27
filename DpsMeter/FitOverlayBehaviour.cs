@@ -517,7 +517,7 @@ namespace TbhDpsMeter
                 if (_heroes.Count > 0 && !colHeroes.Contains(CurHero)) _heroIdx = _heroes.IndexOf(colHeroes[0]);   // focus a visible column
                 // main column + always-on item/material side-column to the RIGHT (expand, don't replace the page)
                 const bool sideOpen = true;   // the gear picker is now persistent (sock/fit-list temporarily override it)
-                float baseW = Mathf.Max(560f, Plugin.FitPanelWidth.Value, colN * 264f + Pad * 2);
+                float baseW = Mathf.Max(560f, Plugin.FitPanelWidth.Value, colN * 282f + Pad * 2);
                 _rect.width = baseW + PickerW;
                 float x = _rect.x, ix = x + Pad, w = _rect.width, iw = baseW - Pad * 2;
 
@@ -530,7 +530,7 @@ namespace TbhDpsMeter
                     if (sr > maxSlotRows) maxSlotRows = sr;
                 }
                 int clearRows = (_clearStages.Count > 0 ? _clearStages.Count + 2 : 2);   // title + per-stage + average (or "no data")
-                int mainRows = clearRows + 10 + maxSlotRows;   // clear-time + (header+dps+8 stats) + gear+chip-sockets
+                int mainRows = clearRows + 6 + maxSlotRows;   // clear-time + (header+dps+4 stat-rows) + gear+chip-sockets
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
@@ -940,15 +940,16 @@ namespace TbhDpsMeter
             string rcH = ratioH > 1.001 ? "#7fffa0" : (ratioH < 0.999 ? "#ff8a8a" : "#9aa3b0");
             GUI.Label(new Rect(cx + 8, cy, iw - 8, lh), $"<size=11><color=#9fb4cc>{Loc.G("fit_dps")}</color> <b>{FmtNum(dpsH)}</b> <color={rcH}>×{ratioH:0.00}</color></size>", _label); cy += lh;
 
-            // compact stats (new value, coloured vs the live/original value)
-            double oAtk = Sv(live, "attack"); ColStat(cx, ref cy, iw, lh, Loc.G("attack"), oAtk, DispFP(oAtk, "AttackDamage", 1), "0", "");
-            double oAsp = Sv(live, "aspd"); ColStat(cx, ref cy, iw, lh, Loc.G("aspd"), oAsp, DispFP(oAsp, "AttackSpeed", 1), "0.##", "");
-            double oCr = Sv(live, "critrate") * 100; ColStat(cx, ref cy, iw, lh, Loc.G("critrate"), oCr, DispFP(oCr, "CriticalChance", 10), "0.#", "%");
-            double oCd = Sv(live, "critdmg") * 100; ColStat(cx, ref cy, iw, lh, Loc.G("critdmg"), oCd, DispFP(oCd, "CriticalDamage", 10), "0", "%");
-            double oPh = Sv(live, "Phys%") * 100; ColStat(cx, ref cy, iw, lh, Loc.G("PhysicalDamagePercent"), oPh, DispFP(oPh, "PhysicalDamagePercent", 10), "0.#", "%");
-            double oAoe = Sv(live, "AoE"); ColStat(cx, ref cy, iw, lh, Loc.G("AoE"), oAoe, DispFP(oAoe, "AreaOfEffect", 1), "0.#", "");
-            double oMs = Sv(live, "mspd") * 100; ColStat(cx, ref cy, iw, lh, Loc.G("mspd"), oMs, DispFP(oMs, "MovementSpeed", 1), "0", "");
-            double oCdr = Sv(live, "cdr") * 100; ColStat(cx, ref cy, iw, lh, Loc.G("cdr"), oCdr, DispFP(oCdr, "CooldownReduction", 10), "0.#", "%");
+            // compact stats — 2 per row (4 rows) so the column stays short; coloured vs the live/original value
+            float hw = iw * 0.5f;
+            double oAtk = Sv(live, "attack"), oAsp = Sv(live, "aspd");
+            ColStatAt(cx, cy, hw, lh, Loc.G("attack"), oAtk, DispFP(oAtk, "AttackDamage", 1), "0", ""); ColStatAt(cx + hw, cy, hw, lh, Loc.G("aspd"), oAsp, DispFP(oAsp, "AttackSpeed", 1), "0.##", ""); cy += lh;
+            double oCr = Sv(live, "critrate") * 100, oCd = Sv(live, "critdmg") * 100;
+            ColStatAt(cx, cy, hw, lh, Loc.G("critrate"), oCr, DispFP(oCr, "CriticalChance", 10), "0.#", "%"); ColStatAt(cx + hw, cy, hw, lh, Loc.G("critdmg"), oCd, DispFP(oCd, "CriticalDamage", 10), "0", "%"); cy += lh;
+            double oPh = Sv(live, "Phys%") * 100, oAoe = Sv(live, "AoE");
+            ColStatAt(cx, cy, hw, lh, Loc.G("PhysicalDamagePercent"), oPh, DispFP(oPh, "PhysicalDamagePercent", 10), "0.#", "%"); ColStatAt(cx + hw, cy, hw, lh, Loc.G("AoE"), oAoe, DispFP(oAoe, "AreaOfEffect", 1), "0.#", ""); cy += lh;
+            double oMs = Sv(live, "mspd") * 100, oCdr = Sv(live, "cdr") * 100;
+            ColStatAt(cx, cy, hw, lh, Loc.G("mspd"), oMs, DispFP(oMs, "MovementSpeed", 1), "0", ""); ColStatAt(cx + hw, cy, hw, lh, Loc.G("cdr"), oCdr, DispFP(oCdr, "CooldownReduction", 10), "0.#", "%"); cy += lh;
             DrawRect(cx, cy, iw, 1, new Color(1, 1, 1, 0.10f)); cy += 3;
 
             // gear list — click a slot to focus it (its sockets show below, the picker on the right follows)
@@ -959,12 +960,12 @@ namespace TbhDpsMeter
                 bool sel = focused && _focus == s && _sockSlot < 0 && !_fitList;
                 if (sel) DrawRect(cx, cy, iw, lh, new Color(0.85f, 0.70f, 0.30f, 0.18f));
                 else if ((s & 1) == 1) DrawRect(cx, cy, iw, lh, new Color(1, 1, 1, 0.03f));
-                GUI.Label(new Rect(cx + 4, cy, 32, lh), $"<size=11><color=#8a93a0>{SlotL(s)}</color></size>", _label);
+                GUI.Label(new Rect(cx + 4, cy, 34, lh), $"<color=#8a93a0>{SlotL(s)}</color>", _label);
                 var stex = GearIconCache.Get(key);
-                if (stex != null) GUI.DrawTexture(new Rect(cx + 34, cy + 1, lh - 3, lh - 3), stex, ScaleMode.ScaleToFit);
+                if (stex != null) GUI.DrawTexture(new Rect(cx + 36, cy + 1, lh - 3, lh - 3), stex, ScaleMode.ScaleToFit);
                 var gt = GearDatabase.ByKey(key);
                 string ghex = changed ? "7fffa0" : GradeHex(gt != null ? gt.Grade : "");
-                GUI.Label(new Rect(cx + 36 + lh, cy, iw - 38 - lh, lh), $"<size=11><color=#{ghex}>{Nm(key)}</color></size>", _label);
+                GUI.Label(new Rect(cx + 38 + lh, cy, iw - 40 - lh, lh), $"<color=#{ghex}>{Nm(key)}</color>", _label);
                 _focusRects.Add(new Rect(cx, cy, iw, lh)); _colHero.Add(hero); _colSlot.Add(s);
                 cy += lh;
                 cy = DrawSlotSockets(cx + 12, cy, cx + iw - 2, lh, hero, s);   // sockets flow horizontally (mind-map style), wrap
@@ -972,13 +973,12 @@ namespace TbhDpsMeter
             return cy;
         }
 
-        // compact column stat line: label + new value, coloured green/red vs the original
-        private void ColStat(float cx, ref float cy, float iw, float lh, string label, double o, double n, string fmt, string suffix)
+        // one column stat at a fixed (x,y) in width w — label + new value, coloured green/red vs the original
+        private void ColStatAt(float x, float y, float w, float lh, string label, double o, double n, string fmt, string suffix)
         {
             string c = n > o * 1.001 ? "#7fffa0" : (n < o * 0.999 ? "#ff8a8a" : "#cdd5df");
-            GUI.Label(new Rect(cx + 4, cy, 52, lh), $"<size=11><color=#8a93a0>{label}</color></size>", _label);
-            GUI.Label(new Rect(cx + 56, cy, iw - 58, lh), $"<size=11><color={c}>{n.ToString(fmt, System.Globalization.CultureInfo.InvariantCulture)}{suffix}</color></size>", _label);
-            cy += lh;
+            GUI.Label(new Rect(x + 4, y, w * 0.52f, lh), $"<color=#8a93a0>{label}</color>", _label);
+            GUI.Label(new Rect(x + 4 + w * 0.52f, y, w * 0.46f - 6, lh), $"<color={c}>{n.ToString(fmt, System.Globalization.CultureInfo.InvariantCulture)}{suffix}</color>", _label);
         }
 
         // one gear slot's sockets, drawn as horizontal CHIPS that flow left→right under the gear row and wrap
@@ -1009,7 +1009,7 @@ namespace TbhDpsMeter
                     if (chx + cw > rightX && chx > startX) { chx = startX; chy += lh; }   // wrap
                     var cell = new Rect(chx, chy, cw, lh - 1);
                     DrawRect(chx, chy, cw, lh - 1, filled ? new Color(0.25f, 0.42f, 0.40f, 0.20f) : new Color(1, 1, 1, 0.03f));
-                    GUI.Label(new Rect(chx + 3, chy, cw - 4, lh), $"<size=10><color={gl[ti]}>◆</color> <color={(filled ? "#bcd0ea" : "#5d6470")}>{body}</color></size>", _label);
+                    GUI.Label(new Rect(chx + 3, chy, cw - 4, lh), $"<size=11><color={gl[ti]}>◆</color> <color={(filled ? "#bcd0ea" : "#5d6470")}>{body}</color></size>", _label);
                     _sockRects.Add(cell); _sockPosList.Add(pos); _sockHeroList.Add(hero); _sockSlotList.Add(slot);
                     chx += cw + gap; pos++;
                 }
