@@ -75,8 +75,10 @@ namespace TbhDpsMeter
         private int _focus = 0;          // gear slot whose sockets are shown in the bench
         private int _sockSlot = -1, _sockPos = -1;  // socket being edited (side-column open when _sockSlot>=0)
         private char _sockType = 'D';    // socket type being edited (D/E/I)
-        private readonly List<Rect> _sockRects = new List<Rect>();    // clickable socket cells (focused item)
+        private readonly List<Rect> _sockRects = new List<Rect>();    // clickable socket cells (all columns, inline)
         private readonly List<int> _sockPosList = new List<int>();    // parallel: socket position per cell
+        private readonly List<int> _sockHeroList = new List<int>();   // parallel: heroKey per socket cell
+        private readonly List<int> _sockSlotList = new List<int>();   // parallel: gear slot per socket cell
         private readonly List<Rect> _focusRects = new List<Rect>();   // clickable gear rows (set focus) — parallel to _colHero/_colSlot
         private readonly List<int> _colHero = new List<int>();        // heroKey per gear-row hitbox (multi-column layout)
         private readonly List<int> _colSlot = new List<int>();        // slot index per gear-row hitbox
@@ -346,7 +348,7 @@ namespace TbhDpsMeter
                 for (int i = 0; i < _focusRects.Count && i < _colHero.Count && i < _colSlot.Count; i++)
                     if (_focusRects[i].Contains(m)) { FocusColumn(_colHero[i], _colSlot[i]); return; }
                 for (int i = 0; i < _sockRects.Count && i < _sockPosList.Count; i++)
-                    if (_sockRects[i].Contains(m)) { OpenSockPicker(_focus, _sockPosList[i]); return; }
+                    if (_sockRects[i].Contains(m)) { FocusColumn(_sockHeroList[i], _sockSlotList[i]); OpenSockPicker(_sockSlotList[i], _sockPosList[i]); return; }
                 if (_rect.Contains(m) && InputCompat.ClaimDrag(Slot)) { _dragging = true; _dragOffset = m - new Vector2(_rect.x, _rect.y); }
             }
             if (_dragging)
@@ -519,12 +521,16 @@ namespace TbhDpsMeter
                 _rect.width = baseW + PickerW;
                 float x = _rect.x, ix = x + Pad, w = _rect.width, iw = baseW - Pad * 2;
 
-                // socket section height = focused item's header + one row per (non-empty type label + each socket)
-                int[] sc0 = SlotSockets(CurHero, _focus);
-                int typesShown = (sc0[0] > 0 ? 1 : 0) + (sc0[1] > 0 ? 1 : 0) + (sc0[2] > 0 ? 1 : 0);
-                int sockRows = Mathf.Max(2, 1 + typesShown + sc0[0] + sc0[1] + sc0[2]);
+                // tallest column: header(2)+stats(8)+gear(10) + every slot's sockets expanded inline
+                int maxSock = 0;
+                foreach (var hcol in colHeroes)
+                {
+                    int sr = 0;
+                    for (int s = 0; s < SlotParts.Length; s++) { var cc = SlotSockets(hcol, s); sr += cc[0] + cc[1] + cc[2]; }
+                    if (sr > maxSock) maxSock = sr;
+                }
                 int clearRows = (_clearStages.Count > 0 ? _clearStages.Count + 2 : 2);   // title + per-stage + average (or "no data")
-                int mainRows = clearRows + 12 + SlotParts.Length + sockRows;   // clear-time + column (header+dps+8 stats+gear) + focused sockets
+                int mainRows = clearRows + 12 + SlotParts.Length + maxSock;   // clear-time + column (header+dps+8 stats+gear+inline sockets)
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
@@ -596,6 +602,7 @@ namespace TbhDpsMeter
 
                 // ===== party heroes side by side, one column each (all expanded); click a gear slot to focus it =====
                 _focusRects.Clear(); _colHero.Clear(); _colSlot.Clear();
+                _sockRects.Clear(); _sockPosList.Clear(); _sockHeroList.Clear(); _sockSlotList.Clear();
                 float colW = (iw - (colHeroes.Count - 1) * 4) / colHeroes.Count;
                 float colTop = cy, colBot = cy;
                 for (int c = 0; c < colHeroes.Count; c++)
@@ -607,8 +614,6 @@ namespace TbhDpsMeter
                     if (b > colBot) colBot = b;
                 }
                 cy = colBot;
-                DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
-                DrawFocusedSockets(ix, ref cy, iw, lh, hero);
 
                 string fgg = SlotGroup(hero, _focus);   // gear group of the focused slot (for the socket-material picker)
 
@@ -962,6 +967,7 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(cx + 36 + lh, cy, iw - 38 - lh, lh), $"<size=11><color=#{ghex}>{Nm(key)}</color></size>", _label);
                 _focusRects.Add(new Rect(cx, cy, iw, lh)); _colHero.Add(hero); _colSlot.Add(s);
                 cy += lh;
+                DrawSlotSockets(cx, ref cy, iw, lh, hero, s);   // every slot's sockets expand inline
             }
             return cy;
         }
@@ -975,52 +981,43 @@ namespace TbhDpsMeter
             cy += lh;
         }
 
-        // the focused slot's sockets, drawn full-width below the hero columns
-        private void DrawFocusedSockets(float ix, ref float cy, float iw, float lh, int hero)
+        // one gear slot's sockets, expanded inline under its row in a hero column (all slots show at once).
+        // Each cell is clickable (→ focus that hero+slot + open the material picker). Type shown as a glyph
+        // colour: deco teal / engrave gold / inscribe violet. Returns via ref cy.
+        private void DrawSlotSockets(float cx, ref float cy, float iw, float lh, int hero, int slot)
         {
+            int[] cc = SlotSockets(hero, slot);
+            if (cc[0] + cc[1] + cc[2] == 0) return;
             _load.TryGetValue(hero, out var gearArr);
             _orig.TryGetValue(hero, out var origArr);
             _sockets.TryGetValue(hero, out var hsock);
-            int fkey = (gearArr != null && _focus < gearArr.Length) ? gearArr[_focus] : 0;
-            string fgg = SlotGroup(hero, _focus);
-            int[] cc = SlotSockets(hero, _focus);
-            GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_sockets")}</color>  <color=#cdd5df>{HeroProbe.HeroName(hero)} · {SlotL(_focus)} · {Nm(fkey)}</color>", _dim); cy += lh;
-            _sockRects.Clear(); _sockPosList.Clear();
-            if (cc[0] + cc[1] + cc[2] == 0)
-            {
-                GUI.Label(new Rect(ix + 12, cy, iw - 12, lh), $"<size=11><color=#67707d>{Loc.G("sock_none")}</color></size>", _label); cy += lh;
-                return;
-            }
-            bool fUnchanged = origArr != null && gearArr != null && _focus < origArr.Length && _focus < gearArr.Length && origArr[_focus] == gearArr[_focus];
-            var fReal = RealSockets.Get(hero, _focus);
-            int[] fEdited = (hsock != null && hsock.TryGetValue(_focus, out var fea)) ? fea : null;
-            string[] tk = { "sock_deco", "sock_engrave", "sock_inscribe" };
+            string gg = SlotGroup(hero, slot);
+            bool unchanged = origArr != null && gearArr != null && slot < origArr.Length && slot < gearArr.Length && origArr[slot] == gearArr[slot];
+            var real = RealSockets.Get(hero, slot);
+            int[] edited = (hsock != null && hsock.TryGetValue(slot, out var ea)) ? ea : null;
             char[] tc = { 'D', 'E', 'I' };
+            string[] glyph = { "<color=#7fd0c2>◆</color>", "<color=#ffd86b>◆</color>", "<color=#c79bff>◆</color>" };
             int pos = 0;
             for (int ti = 0; ti < 3; ti++)
-            {
-                if (cc[ti] == 0) continue;
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9aa3b0>{Loc.G(tk[ti])} ×{cc[ti]}</color>", _dim); cy += lh;
                 for (int j = 0; j < cc[ti]; j++)
                 {
-                    var eff = FitCalc.EffectiveCell(fReal, fEdited, pos, fgg, fUnchanged);
+                    var eff = FitCalc.EffectiveCell(real, edited, pos, gg, unchanged);
                     bool filled = !string.IsNullOrEmpty(eff.Stat);
-                    var cell = new Rect(ix + 12, cy, iw - 12, lh - 1);
-                    DrawRect(cell.x, cell.y, cell.width, cell.height, filled ? new Color(0.25f, 0.42f, 0.40f, 0.22f) : new Color(1, 1, 1, 0.04f));
+                    var cell = new Rect(cx + 14, cy, iw - 14, lh - 1);
+                    DrawRect(cell.x, cell.y, cell.width, cell.height, filled ? new Color(0.25f, 0.42f, 0.40f, 0.20f) : new Color(1, 1, 1, 0.03f));
                     if (filled)
                     {
-                        int mk = (fEdited != null && pos < fEdited.Length && fEdited[pos] > 0) ? fEdited[pos] : MatCatalog.FindByEffect(tc[ti], fgg, eff.Stat, eff.Mod);
+                        int mk = (edited != null && pos < edited.Length && edited[pos] > 0) ? edited[pos] : MatCatalog.FindByEffect(tc[ti], gg, eff.Stat, eff.Mod);
                         var tex = (mk > 0 && tc[ti] != 'I') ? GearIconCache.Get(mk) : null;
-                        var ir = new Rect(ix + 15, cy + 1, lh - 3, lh - 3);
+                        var ir = new Rect(cx + 16, cy + 1, lh - 4, lh - 4);
                         if (tex != null) GUI.DrawTexture(ir, tex, ScaleMode.ScaleToFit);
-                        else GUI.Label(ir, "<color=#7fd0c2>◆</color>", _label);
-                        GUI.Label(new Rect(ix + 16 + lh, cy, iw - 22 - lh, lh), $"<size=11><color=#bcd0ea>{StatL(eff.Stat)} {StatVal(eff.Stat, eff.Mod, eff.Value)}</color></size>", _label);
+                        else GUI.Label(ir, glyph[ti], _label);
+                        GUI.Label(new Rect(cx + 16 + lh, cy, iw - 20 - lh, lh), $"<size=11><color=#bcd0ea>{StatL(eff.Stat)} {StatVal(eff.Stat, eff.Mod, eff.Value)}</color></size>", _label);
                     }
-                    else GUI.Label(new Rect(ix + 18, cy, iw - 24, lh), $"<size=11>◇ <color=#67707d>{Loc.G("sock_empty")}</color></size>", _label);
-                    _sockRects.Add(cell); _sockPosList.Add(pos);
+                    else GUI.Label(new Rect(cx + 16, cy, iw - 18, lh), $"<size=11>{glyph[ti]} <color=#5d6470>{Loc.G("sock_empty")}</color></size>", _label);
+                    _sockRects.Add(cell); _sockPosList.Add(pos); _sockHeroList.Add(hero); _sockSlotList.Add(slot);
                     pos++; cy += lh;
                 }
-            }
         }
 
         private void DrawFitList(float ix, float cy, float iw, float lh, int hero)
