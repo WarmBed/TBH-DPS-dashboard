@@ -517,20 +517,20 @@ namespace TbhDpsMeter
                 if (_heroes.Count > 0 && !colHeroes.Contains(CurHero)) _heroIdx = _heroes.IndexOf(colHeroes[0]);   // focus a visible column
                 // main column + always-on item/material side-column to the RIGHT (expand, don't replace the page)
                 const bool sideOpen = true;   // the gear picker is now persistent (sock/fit-list temporarily override it)
-                float baseW = Mathf.Max(560f, Plugin.FitPanelWidth.Value, colN * 196f + Pad * 2);
+                float baseW = Mathf.Max(560f, Plugin.FitPanelWidth.Value, colN * 264f + Pad * 2);
                 _rect.width = baseW + PickerW;
                 float x = _rect.x, ix = x + Pad, w = _rect.width, iw = baseW - Pad * 2;
 
-                // tallest column: header(2)+stats(8)+gear(10) + every slot's sockets expanded inline
-                int maxSock = 0;
+                // tallest column: header(2)+stats(8) + per slot [gear row + ceil(sockets/2) wrapped chip rows]
+                int maxSlotRows = 0;
                 foreach (var hcol in colHeroes)
                 {
                     int sr = 0;
-                    for (int s = 0; s < SlotParts.Length; s++) { var cc = SlotSockets(hcol, s); sr += cc[0] + cc[1] + cc[2]; }
-                    if (sr > maxSock) maxSock = sr;
+                    for (int s = 0; s < SlotParts.Length; s++) { var cc = SlotSockets(hcol, s); int t = cc[0] + cc[1] + cc[2]; sr += 1 + (t > 0 ? (t + 1) / 2 : 0); }
+                    if (sr > maxSlotRows) maxSlotRows = sr;
                 }
                 int clearRows = (_clearStages.Count > 0 ? _clearStages.Count + 2 : 2);   // title + per-stage + average (or "no data")
-                int mainRows = clearRows + 12 + SlotParts.Length + maxSock;   // clear-time + column (header+dps+8 stats+gear+inline sockets)
+                int mainRows = clearRows + 10 + maxSlotRows;   // clear-time + (header+dps+8 stats) + gear+chip-sockets
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
@@ -967,7 +967,7 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(cx + 36 + lh, cy, iw - 38 - lh, lh), $"<size=11><color=#{ghex}>{Nm(key)}</color></size>", _label);
                 _focusRects.Add(new Rect(cx, cy, iw, lh)); _colHero.Add(hero); _colSlot.Add(s);
                 cy += lh;
-                DrawSlotSockets(cx, ref cy, iw, lh, hero, s);   // every slot's sockets expand inline
+                cy = DrawSlotSockets(cx + 12, cy, cx + iw - 2, lh, hero, s);   // sockets flow horizontally (mind-map style), wrap
             }
             return cy;
         }
@@ -981,13 +981,14 @@ namespace TbhDpsMeter
             cy += lh;
         }
 
-        // one gear slot's sockets, expanded inline under its row in a hero column (all slots show at once).
-        // Each cell is clickable (→ focus that hero+slot + open the material picker). Type shown as a glyph
-        // colour: deco teal / engrave gold / inscribe violet. Returns via ref cy.
-        private void DrawSlotSockets(float cx, ref float cy, float iw, float lh, int hero, int slot)
+        // one gear slot's sockets, drawn as horizontal CHIPS that flow left→right under the gear row and wrap
+        // when they hit rightX (mind-map style — keeps the column from getting tall). Each chip is clickable
+        // (→ focus that hero+slot + open the material picker). Type colour: deco teal / engrave gold / inscribe
+        // violet. Returns the bottom y (= topY if the slot has no sockets, so the gear row alone advances cy).
+        private float DrawSlotSockets(float startX, float topY, float rightX, float lh, int hero, int slot)
         {
             int[] cc = SlotSockets(hero, slot);
-            if (cc[0] + cc[1] + cc[2] == 0) return;
+            if (cc[0] + cc[1] + cc[2] == 0) return topY;
             _load.TryGetValue(hero, out var gearArr);
             _orig.TryGetValue(hero, out var origArr);
             _sockets.TryGetValue(hero, out var hsock);
@@ -995,29 +996,24 @@ namespace TbhDpsMeter
             bool unchanged = origArr != null && gearArr != null && slot < origArr.Length && slot < gearArr.Length && origArr[slot] == gearArr[slot];
             var real = RealSockets.Get(hero, slot);
             int[] edited = (hsock != null && hsock.TryGetValue(slot, out var ea)) ? ea : null;
-            char[] tc = { 'D', 'E', 'I' };
-            string[] glyph = { "<color=#7fd0c2>◆</color>", "<color=#ffd86b>◆</color>", "<color=#c79bff>◆</color>" };
+            string[] gl = { "#7fd0c2", "#ffd86b", "#c79bff" };
+            float chx = startX, chy = topY, gap = 3;
             int pos = 0;
             for (int ti = 0; ti < 3; ti++)
                 for (int j = 0; j < cc[ti]; j++)
                 {
                     var eff = FitCalc.EffectiveCell(real, edited, pos, gg, unchanged);
                     bool filled = !string.IsNullOrEmpty(eff.Stat);
-                    var cell = new Rect(cx + 14, cy, iw - 14, lh - 1);
-                    DrawRect(cell.x, cell.y, cell.width, cell.height, filled ? new Color(0.25f, 0.42f, 0.40f, 0.20f) : new Color(1, 1, 1, 0.03f));
-                    if (filled)
-                    {
-                        int mk = (edited != null && pos < edited.Length && edited[pos] > 0) ? edited[pos] : MatCatalog.FindByEffect(tc[ti], gg, eff.Stat, eff.Mod);
-                        var tex = (mk > 0 && tc[ti] != 'I') ? GearIconCache.Get(mk) : null;
-                        var ir = new Rect(cx + 16, cy + 1, lh - 4, lh - 4);
-                        if (tex != null) GUI.DrawTexture(ir, tex, ScaleMode.ScaleToFit);
-                        else GUI.Label(ir, glyph[ti], _label);
-                        GUI.Label(new Rect(cx + 16 + lh, cy, iw - 20 - lh, lh), $"<size=11><color=#bcd0ea>{StatL(eff.Stat)} {StatVal(eff.Stat, eff.Mod, eff.Value)}</color></size>", _label);
-                    }
-                    else GUI.Label(new Rect(cx + 16, cy, iw - 18, lh), $"<size=11>{glyph[ti]} <color=#5d6470>{Loc.G("sock_empty")}</color></size>", _label);
+                    string body = filled ? $"{StatL(eff.Stat)}{StatVal(eff.Stat, eff.Mod, eff.Value)}" : Loc.G("sock_empty");
+                    float cw = Mathf.Min(rightX - startX, _label.CalcSize(new GUIContent(body)).x + 18);
+                    if (chx + cw > rightX && chx > startX) { chx = startX; chy += lh; }   // wrap
+                    var cell = new Rect(chx, chy, cw, lh - 1);
+                    DrawRect(chx, chy, cw, lh - 1, filled ? new Color(0.25f, 0.42f, 0.40f, 0.20f) : new Color(1, 1, 1, 0.03f));
+                    GUI.Label(new Rect(chx + 3, chy, cw - 4, lh), $"<size=10><color={gl[ti]}>◆</color> <color={(filled ? "#bcd0ea" : "#5d6470")}>{body}</color></size>", _label);
                     _sockRects.Add(cell); _sockPosList.Add(pos); _sockHeroList.Add(hero); _sockSlotList.Add(slot);
-                    pos++; cy += lh;
+                    chx += cw + gap; pos++;
                 }
+            return chy + lh;
         }
 
         private void DrawFitList(float ix, float cy, float iw, float lh, int hero)
