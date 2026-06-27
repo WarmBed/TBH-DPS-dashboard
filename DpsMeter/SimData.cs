@@ -105,19 +105,20 @@ namespace TbhDpsMeter
             streams.Add(new AtkStream(attack * crit * s.Coeff(lvl), interval, s.Aoe ? AoeTargets : 1));
         }
 
-        /// <summary>Binary-search the effHP scale k so the iterative sim reproduces a hero/party's measured stage
-        /// clear time with the CURRENT streams. Returns k in [kMin,kMax]; clamps. StageTime is monotonic in k.</summary>
-        public static double CalibrateHpScale(StageInfo st, IList<AtkStream> streams, double measuredSec)
+        /// <summary>Binary-search the effHP scale k so the iterative sim reproduces a measured clear with the
+        /// CURRENT streams. Uses the explicit wave count (= the run's ACTUAL waves, which may be a partial run —
+        /// don't model the full stage when the measured time is only a few waves). StageTime is monotonic in k.</summary>
+        public static double CalibrateHpScale(int waves, int mpw, double effHp, double bossHp, IList<AtkStream> streams, double measuredSec)
         {
             double lo = 0.001, hi = 5.0;
-            double tLo = WaveSim.StageTime(st.Waves, st.Mpw, st.EffHp * lo, streams, 0, 0, st.BossHp * lo);
-            double tHi = WaveSim.StageTime(st.Waves, st.Mpw, st.EffHp * hi, streams, 0, 0, st.BossHp * hi);
+            double tLo = WaveSim.StageTime(waves, mpw, effHp * lo, streams, 0, 0, bossHp * lo);
+            double tHi = WaveSim.StageTime(waves, mpw, effHp * hi, streams, 0, 0, bossHp * hi);
             if (measuredSec <= tLo) return lo;
             if (measuredSec >= tHi) return hi;
-            for (int it = 0; it < 40; it++)
+            for (int it = 0; it < 36; it++)
             {
                 double mid = (lo + hi) * 0.5;
-                double t = WaveSim.StageTime(st.Waves, st.Mpw, st.EffHp * mid, streams, 0, 0, st.BossHp * mid);
+                double t = WaveSim.StageTime(waves, mpw, effHp * mid, streams, 0, 0, bossHp * mid);
                 if (t < measuredSec) lo = mid; else hi = mid;
             }
             return (lo + hi) * 0.5;

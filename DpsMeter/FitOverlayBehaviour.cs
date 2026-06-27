@@ -909,9 +909,13 @@ namespace TbhDpsMeter
                     _simNew.Add(measured); _simFloor.Add(ClearTimeSim.FixedFloor(wc > 0 ? wc : st.Waves));
                     continue;
                 }
-                double k = StreamBuilder.CalibrateHpScale(st, curS, measured);   // effHP scale so current ≈ measured
-                double pred = WaveSim.StageTime(st.Waves, st.Mpw, st.EffHp * k, sbS, 0, 0, st.BossHp * k);
-                _simNew.Add(pred); _simFloor.Add(ClearTimeSim.FixedFloor(st.Waves));
+                // model the SAME number of waves the run actually did (a partial run shouldn't predict the whole
+                // stage); the end boss only counts on a full clear.
+                int waves = wc > 0 ? System.Math.Min(wc, st.Waves) : st.Waves;
+                double bossHp = waves >= st.Waves ? st.BossHp : 0;
+                double k = StreamBuilder.CalibrateHpScale(waves, st.Mpw, st.EffHp, bossHp, curS, measured);
+                double pred = WaveSim.StageTime(waves, st.Mpw, st.EffHp * k, sbS, 0, 0, bossHp * k);
+                _simNew.Add(pred); _simFloor.Add(ClearTimeSim.FixedFloor(waves));
             }
         }
 
@@ -940,7 +944,8 @@ namespace TbhDpsMeter
 
             float barX = ix + 416, barW = iw - 416;
             double maxBase = 0, totSaved = 0, totBase = 0;
-            for (int i = 0; i < _simBase.Count; i++) if (_simBase[i] > maxBase) maxBase = _simBase[i];
+            // scale to the larger of base/predicted across rows so a worse-gear prediction can't overflow the bar
+            for (int i = 0; i < _simBase.Count; i++) { if (_simBase[i] > maxBase) maxBase = _simBase[i]; if (_simNew[i] > maxBase) maxBase = _simNew[i]; }
             if (maxBase <= 0) maxBase = 1;
             // each row = the cached iterative sim: BaseClear (measured) → NewClear (predicted), floor/battle split
             for (int i = 0; i < _simStage.Count; i++)
