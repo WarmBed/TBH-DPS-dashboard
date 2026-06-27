@@ -559,6 +559,7 @@ namespace TbhDpsMeter
                     var fReal = RealSockets.Get(hero, _focus);
                     int[] fEdited = (hsock != null && hsock.TryGetValue(_focus, out var fea)) ? fea : null;
                     string[] tk = { "sock_deco", "sock_engrave", "sock_inscribe" };
+                    char[] tc = { 'D', 'E', 'I' };
                     int pos = 0;
                     for (int ti = 0; ti < 3; ti++)
                     {
@@ -568,10 +569,19 @@ namespace TbhDpsMeter
                         {
                             var eff = FitCalc.EffectiveCell(fReal, fEdited, pos, fgg, fUnchanged);
                             bool filled = !string.IsNullOrEmpty(eff.Stat);
-                            string txt = filled ? $"<color=#bcd0ea>{StatL(eff.Stat)} {StatVal(eff.Stat, eff.Mod, eff.Value)}</color>" : $"<color=#67707d>{Loc.G("sock_empty")}</color>";
                             var cell = new Rect(ix + 12, cy, iw - 12, lh - 1);
                             DrawRect(cell.x, cell.y, cell.width, cell.height, filled ? new Color(0.25f, 0.42f, 0.40f, 0.22f) : new Color(1, 1, 1, 0.04f));
-                            GUI.Label(new Rect(ix + 18, cy, iw - 24, lh), $"<size=11>◇ {txt}</size>", _label);
+                            if (filled)
+                            {
+                                // material key: edited cell knows it; a real cell borrows a matching material's icon
+                                int mk = (fEdited != null && pos < fEdited.Length && fEdited[pos] > 0) ? fEdited[pos] : MatCatalog.FindByEffect(tc[ti], fgg, eff.Stat, eff.Mod);
+                                var tex = mk > 0 ? GearIconCache.Get(mk) : null;
+                                var ir = new Rect(ix + 15, cy + 1, lh - 3, lh - 3);
+                                if (tex != null) GUI.DrawTexture(ir, tex, ScaleMode.ScaleToFit);
+                                else { var pcc = GUI.color; GUI.color = new Color(0.45f, 0.65f, 0.62f, 0.5f); GUI.DrawTexture(ir, _white); GUI.color = pcc; }
+                                GUI.Label(new Rect(ix + 16 + lh, cy, iw - 22 - lh, lh), $"<size=11><color=#bcd0ea>{StatL(eff.Stat)} {StatVal(eff.Stat, eff.Mod, eff.Value)}</color></size>", _label);
+                            }
+                            else GUI.Label(new Rect(ix + 18, cy, iw - 24, lh), $"<size=11>◇ <color=#67707d>{Loc.G("sock_empty")}</color></size>", _label);
                             _sockRects.Add(cell); _sockPosList.Add(pos);
                             pos++; cy += lh;
                         }

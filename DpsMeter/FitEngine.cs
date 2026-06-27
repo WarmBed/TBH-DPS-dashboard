@@ -159,6 +159,15 @@ namespace TbhDpsMeter
         }
         public static SockMat Get(int key) { _byKey.TryGetValue(key, out var m); return m; }
         public static List<SockMat> ByType(char t) { _byType.TryGetValue(t, out var l); return l ?? new List<SockMat>(); }
+        /// <summary>A material of a type whose effect on a gear group matches a stat+mod (so a REAL applied
+        /// socket, known only by its effect, can borrow that material's icon). 0 if none.</summary>
+        public static int FindByEffect(char type, string gearGroup, string stat, string mod)
+        {
+            if (string.IsNullOrEmpty(stat)) return 0;
+            foreach (var m in ByType(type))
+                if (m.HasFor(gearGroup)) { var e = m.Effect(gearGroup); if (e.Stat == stat && e.Mod == mod) return m.Key; }
+            return 0;
+        }
     }
 
     /// <summary>High-level fitting helpers: turn a loadout (the equipped item keys) into aggregated stats,
