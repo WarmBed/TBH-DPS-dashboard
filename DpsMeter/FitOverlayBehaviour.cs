@@ -479,10 +479,12 @@ namespace TbhDpsMeter
             if (origA > 1e-6) return oDisp * (newA / origA);
             return oDisp + (newA - origA) / aggScale;
         }
-        // live-anchored display using the flat/percent split. Given live = (base + origFlat)·origPct, the new
-        // value is exactly  live·(newPct/origPct) + Δflat·newPct  — so a percent modifier scales the live base
-        // even when the gear flat base is 0 (the 範圍 case), while flat changes still add. aggScale converts the
-        // flat from aggregate units to display units (10 for ×10-stored percents, 1 for absolute values).
+        // live-anchored display using the flat/percent split.
+        //  • when the gear contributes a flat base for this stat (origAgg = flat·pct > 0) use the RATIO
+        //    live·(newAgg/origAgg) — the raw flat units cancel, so it's scale-correct for any stat (attack,
+        //    AttackSpeed via the weapon base, etc.). This is the robust common path.
+        //  • only when the gear gives NO flat base (e.g. 範圍 — its base lives on the character) fall back to
+        //    scaling the live value by the percent factor, so a percent socket isn't lost to 0×factor.
         private double DispFP(double live, string stat, double aggScale)
         {
             double of = (_fpFlatO != null && _fpFlatO.TryGetValue(stat, out var a)) ? a : 0;
@@ -490,6 +492,8 @@ namespace TbhDpsMeter
             double nf = (_fpFlatN != null && _fpFlatN.TryGetValue(stat, out var c)) ? c : 0;
             double np = (_fpPctN != null && _fpPctN.TryGetValue(stat, out var d)) ? d : 1.0;
             if (op <= 1e-9) op = 1.0; if (np <= 1e-9) np = 1.0;
+            double origAgg = of * op, newAgg = nf * np;
+            if (origAgg > 1e-6) return live * (newAgg / origAgg);
             return live * (np / op) + ((nf - of) / aggScale) * np;
         }
         // gear-rarity hex (no leading '#') — same palette as the gear-score panel, one source of truth.
@@ -580,16 +584,16 @@ namespace TbhDpsMeter
                 _fpFlatN = new Dictionary<string, double>(); _fpPctN = new Dictionary<string, double>();
                 FitCalc.LoadoutFP(origArr, origLines, _fpFlatO, _fpPctO);
                 FitCalc.LoadoutFP(gearArr, sbLines, _fpFlatN, _fpPctN);
-                double sbDps = FitCalc.LoadoutDpsWith(gearArr, sbLines);
-                double origDps = FitCalc.LoadoutDpsWith(origArr, origLines);
                 _liveStats.TryGetValue(hero, out var live);   // real character stats (anchor)
-                double ratio = origDps > 0 ? sbDps / origDps : 1.0;
+                double ratio = LiveRatio(live);
+                // ratio + speedMult use the FOCUSED hero's _fp* fields, so compute them BEFORE the ratioByHero
+                // loop below (HeroRatio rebuilds _fp* for each other hero, clobbering the focused values).
+                double mspdLive = Sv(live, "mspd") * 100;
+                double speedMult = mspdLive > 0.0001 ? DispFP(mspdLive, "MovementSpeed", 1) / mspdLive : 1.0;
 
                 // per-hero DPS ratios → party clear-time at the TOP (combines every member's edits)
                 var ratioByHero = new Dictionary<int, double>();
                 foreach (var hh in _heroes) ratioByHero[hh] = (hh == hero) ? ratio : HeroRatio(hh);
-                double mspdLive = Sv(live, "mspd") * 100;
-                double speedMult = mspdLive > 0.0001 ? DispFP(mspdLive, "MovementSpeed", 1) / mspdLive : 1.0;
                 cy = DrawClearRows(ix, cy, iw, lh, hero, ratioByHero, speedMult);
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
@@ -782,11 +786,12 @@ namespace TbhDpsMeter
             foreach (var kv in f.Sockets) { var a = new int[kv.Value.Length]; Array.Copy(kv.Value, a, a.Length); sm[kv.Key] = a; }
             _fitList = false;
         }
-        // DPS ratio (sandbox edits vs original) for ANY hero, from its stored loadout + socket edits. Used to
-        // combine every party member's changes in the clear-time, not just the focused hero's.
+        // DPS ratio (sandbox edits vs original) for ANY hero. Builds the hero's flat/percent split (sets the
+        // _fp* fields) then anchors the formula to the hero's LIVE stats — see LiveRatio for why.
         private double HeroRatio(int hero)
         {
             if (!_load.TryGetValue(hero, out var gearArr) || !_orig.TryGetValue(hero, out var origArr)) return 1.0;
+            if (!_liveStats.TryGetValue(hero, out var live) || live == null) return 1.0;
             _sockets.TryGetValue(hero, out var hsock);
             var sbLines = new Dictionary<int, List<GearStat>>();
             var origLines = new Dictionary<int, List<GearStat>>();
@@ -800,8 +805,32 @@ namespace TbhDpsMeter
                 var scc = SlotSockets(hero, s); int n = scc[0] + scc[1] + scc[2];
                 if (n > 0) { var ls = new List<GearStat>(); for (int p = 0; p < n; p++) { var e = FitCalc.EffectiveCell(realO, edited, p, gg, unchanged); if (!string.IsNullOrEmpty(e.Stat)) ls.Add(e); } if (ls.Count > 0) sbLines[s] = ls; }
             }
-            double od = FitCalc.LoadoutDpsWith(origArr, origLines);
-            return od > 0 ? FitCalc.LoadoutDpsWith(gearArr, sbLines) / od : 1.0;
+            _fpFlatO = new Dictionary<string, double>(); _fpPctO = new Dictionary<string, double>();
+            _fpFlatN = new Dictionary<string, double>(); _fpPctN = new Dictionary<string, double>();
+            FitCalc.LoadoutFP(origArr, origLines, _fpFlatO, _fpPctO);
+            FitCalc.LoadoutFP(gearArr, sbLines, _fpFlatN, _fpPctN);
+            return LiveRatio(live);
+        }
+
+        // DPS ratio from LIVE-anchored combat stats (real attack/aspd/crit), using the _fp* fields already set
+        // for this hero. The raw collapsed aggregate zeroes out stats the gear gives only as a percent (e.g. a
+        // weapon's AttackSpeed) → the formula's ÷0 made the ratio explode (×3406). Anchoring to live + the
+        // per-stat DispFP change keeps it realistic. Units cancel in the ratio, so absolute scale is irrelevant.
+        private double LiveRatio(Dictionary<string, double> live)
+        {
+            double oAtk = Sv(live, "attack"), oAsp = Sv(live, "aspd");
+            double oCrR = Sv(live, "critrate"), oCrD = Sv(live, "critdmg"), oPh = Sv(live, "Phys%");
+            var oc = new CombatStats { AttackDamage = oAtk, AttackSpeed = oAsp, CritChance = oCrR, CritDamage = oCrD, DamageMult = 1.0 + oPh };
+            var nc = new CombatStats
+            {
+                AttackDamage = DispFP(oAtk, "AttackDamage", 1),
+                AttackSpeed = DispFP(oAsp, "AttackSpeed", 1),
+                CritChance = DispFP(oCrR * 100, "CriticalChance", 10) / 100.0,
+                CritDamage = DispFP(oCrD * 100, "CriticalDamage", 10) / 100.0,
+                DamageMult = 1.0 + DispFP(oPh * 100, "PhysicalDamagePercent", 10) / 100.0,
+            };
+            double od = DamageFormula.ExpectedDps(oc);
+            return od > 0 ? DamageFormula.ExpectedDps(nc) / od : 1.0;
         }
 
         // live clear-time prediction block, drawn in the top panel under the stats. Each stage's clear =
