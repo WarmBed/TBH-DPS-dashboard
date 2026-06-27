@@ -121,7 +121,7 @@ namespace TbhDpsMeter
         };
         private static string Short2EnumName(string s) => (s != null && Short2Enum.TryGetValue(s, out var e)) ? e : (s ?? "");
 
-        private Rect _closeRect, _resetRect, _backRect;
+        private Rect _closeRect, _resetRect, _backRect, _clearHeadRect;
         private readonly List<Rect> _tabRects = new List<Rect>();
         private readonly List<Rect> _swapRects = new List<Rect>();
         private readonly List<Rect> _pickRects = new List<Rect>();
@@ -351,6 +351,7 @@ namespace TbhDpsMeter
                         if (_pickRects[i].Contains(m)) { SetSlot(_focus, _pickKeys[i]); return; }   // keep list open after a swap
                 }
                 if (_resetRect.Contains(m)) { ResetLoadout(); return; }
+                if (_clearHeadRect.Contains(m) && Plugin.FitShowClear != null) { Plugin.FitShowClear.Value = !Plugin.FitShowClear.Value; _simHash = -1; return; }
                 // click a gear slot in any column → focus that (hero, slot); the picker on the right follows
                 for (int i = 0; i < _focusRects.Count && i < _colHero.Count && i < _colSlot.Count; i++)
                     if (_focusRects[i].Contains(m)) { FocusColumn(_colHero[i], _colSlot[i]); return; }
@@ -539,7 +540,8 @@ namespace TbhDpsMeter
                     for (int s = 0; s < SlotParts.Length; s++) { var cc = SlotSockets(hcol, s); int t = cc[0] + cc[1] + cc[2]; sr += 1 + (t > 0 ? (t + 1) / 2 : 0); }
                     if (sr > maxSlotRows) maxSlotRows = sr;
                 }
-                int clearRows = (_clearStages.Count > 0 ? _clearStages.Count + 3 : 2);   // title + legend + per-stage + average
+                bool showClearBlock = Plugin.FitShowClear == null || Plugin.FitShowClear.Value;
+                int clearRows = !showClearBlock ? 1 : (_clearStages.Count > 0 ? _clearStages.Count + 3 : 2);   // collapsed = just the title
                 int mainRows = clearRows + 6 + maxSlotRows;   // clear-time + (header+dps+4 stat-rows) + gear+chip-sockets
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
@@ -627,7 +629,8 @@ namespace TbhDpsMeter
                     AddStreams(hh, lvh, skKeys, skLvl, curStreams, sbStreams);
                 }
                 int simHash = StreamHash(sbStreams);
-                if (simHash != _simHash) { _simHash = simHash; RecomputeSim(curStreams, sbStreams); }
+                bool showClear = Plugin.FitShowClear == null || Plugin.FitShowClear.Value;
+                if (showClear && simHash != _simHash) { _simHash = simHash; RecomputeSim(curStreams, sbStreams); }   // heavy sim only when visible
                 cy = DrawClearRows(ix, cy, iw, lh, hero, ratioByHero);
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
@@ -890,8 +893,19 @@ namespace TbhDpsMeter
             return h;
         }
 
-        // run the iterative WaveSim for every farmed stage: calibrate the effHP scale so the CURRENT streams
-        // reproduce the measured clear, then predict with the SANDBOX streams. Overkill / cadence / AoE fall out.
+        // per-wave fixed overhead, read from the run's REAL per-wave durations (the stage-compare's "每波時間"):
+        // the fastest waves are ~all overhead (battle ≈ 0), so a low percentile is the floor DPS can't compress.
+        // Falls back to the decompiled spawn (0.8s) + stage-end (4.25s) when no per-wave data exists.
+        private static double FloorPerWave(List<float> wd, int waves)
+        {
+            if (wd == null || wd.Count == 0) return 0.8 + (waves > 0 ? 4.25 / waves : 0);
+            var s = new List<float>(wd); s.Sort();
+            int idx = Mathf.Clamp((int)(s.Count * 0.15f), 0, s.Count - 1);   // a representative fast (near-overhead) wave
+            return s[idx];
+        }
+
+        // run the iterative WaveSim for every farmed stage: split the measured clear into an EMPIRICAL per-wave
+        // floor (from real per-wave times) + a DPS-bound battle, then scale only the battle by the sandbox sim.
         private void RecomputeSim(Dictionary<int, List<AtkStream>> cur, Dictionary<int, List<AtkStream>> sb)
         {
             _simStage.Clear(); _simBase.Clear(); _simNew.Clear(); _simFloor.Clear();
@@ -916,15 +930,19 @@ namespace TbhDpsMeter
                 // stage); the end boss only counts on a full clear.
                 int waves = wc > 0 ? System.Math.Min(wc, st.Waves) : st.Waves;
                 double bossHp = waves >= st.Waves ? st.BossHp : 0;
-                double k = StreamBuilder.CalibrateHpScale(waves, st.Mpw, st.EffHp, bossHp, curS, measured);
-                // show the sim RELATIVELY: new = measured × (sandbox sim ÷ current sim). With no edit the two
-                // sims are identical ⇒ ratio 1 ⇒ new == measured (no spurious change even when the calibration
-                // couldn't reach the measured time, e.g. a partial run below the spawn/cadence floor).
-                double predCur = WaveSim.StageTime(waves, st.Mpw, st.EffHp * k, curS, 0, 0, bossHp * k);
-                double predSb = WaveSim.StageTime(waves, st.Mpw, st.EffHp * k, sbS, 0, 0, bossHp * k);
-                bool ok = predCur > 0.01 && !double.IsInfinity(predCur) && !double.IsNaN(predSb) && !double.IsInfinity(predSb);
-                double newClear = ok ? measured * (predSb / predCur) : measured;
-                _simNew.Add(newClear); _simFloor.Add(ClearTimeSim.FixedFloor(waves));
+                // FLOOR from the REAL per-wave times: the fastest waves are ~pure overhead (spawn/approach/reorg/
+                // anim), so a low percentile of WaveDurations × waves is the part DPS can't compress. Only the
+                // remainder (battleMeasured) is DPS-bound, and that's what the iterative sim scales.
+                double floorTotal = System.Math.Min(measured, FloorPerWave(r.WaveDurations, waves) * waves);
+                double battleMeasured = System.Math.Max(0.5, measured - floorTotal);
+                double k = StreamBuilder.CalibrateHpScale(waves, st.Mpw, st.EffHp, bossHp, curS, battleMeasured);
+                // show the battle RELATIVELY: newBattle = battleMeasured × (sandbox battle ÷ current battle).
+                // No edit ⇒ ratio 1 ⇒ newClear == measured (exact identity, robust to calibration clamping).
+                double bCur = WaveSim.BattleTime(waves, st.Mpw, st.EffHp * k, curS, bossHp * k);
+                double bSb = WaveSim.BattleTime(waves, st.Mpw, st.EffHp * k, sbS, bossHp * k);
+                bool ok = bCur > 0.01 && !double.IsInfinity(bCur) && !double.IsNaN(bSb) && !double.IsInfinity(bSb);
+                double newClear = floorTotal + (ok ? battleMeasured * (bSb / bCur) : battleMeasured);
+                _simNew.Add(newClear); _simFloor.Add(floorTotal);
             }
         }
 
@@ -944,8 +962,13 @@ namespace TbhDpsMeter
                 ph += $"<color={col}>{HeroProbe.HeroName(h)}×{rr:0.00}</color>  ";
             }
             if (ph == "") { double rr = ratioByHero != null && ratioByHero.TryGetValue(hero, out var v) ? v : 1.0; ph = $"{HeroProbe.HeroName(hero)}×{rr:0.00}"; }
-            GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>⏱ {Loc.G("fit_cleartitle")}</color>  <size=10>{ph}</size>", _label);
+            // clickable title — toggles the whole prediction block (the user can hide it). ▼ shown / ▶ collapsed.
+            bool show = Plugin.FitShowClear == null || Plugin.FitShowClear.Value;
+            _clearHeadRect = new Rect(ix, cy, iw, lh);
+            string arrow = show ? "▼" : "▶";
+            GUI.Label(_clearHeadRect, $"<color=#9fb4cc>{arrow} {Loc.G("fit_cleartitle")}</color>  <size=10>{ph}</size>", _label);
             cy += lh;
+            if (!show) return cy;   // collapsed: just the title (click it to re-open)
             // legend: 地板 = fixed spawn/end floor (DPS can't cut it); 戰 = the DPS-bound kill+cadence time
             GUI.Label(new Rect(ix + 258, cy, iw - 258, lh), $"<size=10><color=#7d8aa0>■地板=固定</color>  <color=#9fb4cc>■戰=DPS壓縮</color></size>", _dim);
             cy += (int)(lh * 0.7f);

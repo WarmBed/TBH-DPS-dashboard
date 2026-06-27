@@ -67,6 +67,16 @@ namespace TbhDpsMeter
             return t;
         }
 
+        /// <summary>Pure BATTLE time only (no spawn/approach/end floor): Σ over waves of the iterative kill time,
+        /// plus the boss. The bench adds an EMPIRICAL per-wave floor (from the run's measured per-wave durations)
+        /// on top — that floor is the part DPS can't compress, so it must not be inside the calibrated battle.</summary>
+        public static double BattleTime(int waves, int monstersPerWave, double monsterHp, IList<AtkStream> atks, double bossHp)
+        {
+            double t = (waves > 0 ? waves : 0) * WaveTime(monsterHp, monstersPerWave, atks);
+            if (bossHp > 0) t += WaveTime(bossHp, 1, atks);
+            return t;
+        }
+
         /// <summary>Full stage clear time. Each wave = fixed spawn-anim (0.8s) + approach (move-bound) + the
         /// iterative battle; the boss is a 1-monster wave. Plus stage entry and the 4.25s stage-end. The fixed
         /// delays are the decompiled constants (see [[combat-clear-model]]). approachPerWave is the move/range

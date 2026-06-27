@@ -112,21 +112,21 @@ namespace TbhDpsMeter
             if (cr > 0.001) streams.Add(new AtkStream(attack * critDmg * coeff, interval / cr, targets));
         }
 
-        /// <summary>Binary-search the effHP scale k so the iterative sim reproduces a measured clear with the
-        /// CURRENT streams. Uses the explicit wave count (= the run's ACTUAL waves, which may be a partial run —
-        /// don't model the full stage when the measured time is only a few waves). StageTime is monotonic in k.</summary>
-        public static double CalibrateHpScale(int waves, int mpw, double effHp, double bossHp, IList<AtkStream> streams, double measuredSec)
+        /// <summary>Binary-search the effHP scale k so the iterative BATTLE time (no floor) reproduces the
+        /// measured battle portion (= measured clear − the empirical per-wave floor) with the CURRENT streams.
+        /// BattleTime is monotonic decreasing in 1/k, so monotonic in k.</summary>
+        public static double CalibrateHpScale(int waves, int mpw, double effHp, double bossHp, IList<AtkStream> streams, double battleSec)
         {
-            double lo = 0.001, hi = 5.0;
-            double tLo = WaveSim.StageTime(waves, mpw, effHp * lo, streams, 0, 0, bossHp * lo);
-            double tHi = WaveSim.StageTime(waves, mpw, effHp * hi, streams, 0, 0, bossHp * hi);
-            if (measuredSec <= tLo) return lo;
-            if (measuredSec >= tHi) return hi;
+            double lo = 0.0001, hi = 5.0;
+            double tLo = WaveSim.BattleTime(waves, mpw, effHp * lo, streams, bossHp * lo);
+            double tHi = WaveSim.BattleTime(waves, mpw, effHp * hi, streams, bossHp * hi);
+            if (battleSec <= tLo) return lo;
+            if (battleSec >= tHi) return hi;
             for (int it = 0; it < 36; it++)
             {
                 double mid = (lo + hi) * 0.5;
-                double t = WaveSim.StageTime(waves, mpw, effHp * mid, streams, 0, 0, bossHp * mid);
-                if (t < measuredSec) lo = mid; else hi = mid;
+                double t = WaveSim.BattleTime(waves, mpw, effHp * mid, streams, bossHp * mid);
+                if (t < battleSec) lo = mid; else hi = mid;
             }
             return (lo + hi) * 0.5;
         }
