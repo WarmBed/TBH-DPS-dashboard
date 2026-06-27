@@ -87,7 +87,7 @@ namespace TbhDpsMeter
         // flat/percent split of the orig + sandbox loadouts, for live-anchored stat display (set each frame in OnGUI)
         private Dictionary<string, double> _fpFlatO, _fpPctO, _fpFlatN, _fpPctN;
         private float _savedFlash;      // frame counter for the "已儲存" toast
-        private int _pickerPage;
+        private int _pickFirst;
         private string _pickGrade = "";  // active grade-filter chip in the picker ("" = all)
         private string _pickStat = "";   // active stat-filter chip in the picker ("" = all); item must carry this StatType
         private readonly List<Rect> _gradeRects = new List<Rect>();   // grade-chip hitboxes
@@ -115,7 +115,6 @@ namespace TbhDpsMeter
         private readonly List<Rect> _swapRects = new List<Rect>();
         private readonly List<Rect> _pickRects = new List<Rect>();
         private readonly List<int> _pickKeys = new List<int>();
-        private Rect _ppPrev, _ppNext;
 
         private float _scale = 1f;
         private readonly PanelResize _resize = new PanelResize();
@@ -265,7 +264,7 @@ namespace TbhDpsMeter
         // Changing slot clears the picker's grade/stat filters (a stale filter could hide the new list).
         private void FocusSlot(int slot)
         {
-            if (_focus != slot) { _pickGrade = ""; _pickStat = ""; _pickerPage = 0; }
+            if (_focus != slot) { _pickGrade = ""; _pickStat = ""; _pickFirst = 0; }
             _focus = slot; _sockSlot = -1; _fitList = false;
         }
         // open the side-column material picker for a socket; its type (D/E/I) follows the position
@@ -273,7 +272,7 @@ namespace TbhDpsMeter
         {
             var cc = SlotSockets(CurHero, slot);
             _sockType = pos < cc[0] ? 'D' : (pos < cc[0] + cc[1] ? 'E' : 'I');
-            _sockSlot = slot; _sockPos = pos; _fitList = false; _pickerPage = 0; _pickGrade = ""; _pickStat = "";
+            _sockSlot = slot; _sockPos = pos; _fitList = false; _pickFirst = 0; _pickGrade = ""; _pickStat = "";
         }
 
         private void HandlePointer()
@@ -286,6 +285,8 @@ namespace TbhDpsMeter
                 var rr = _resize.Handle(Slot, m, ref rw, ref dh, 460f, Mathf.Max(460f, Screen.width * 0.95f), 0f, 0f, false);
                 if (rr != PanelResize.Result.None) { Plugin.FitPanelWidth.Value = (rr == PanelResize.Result.Reset) ? 560f : rw; return; }
             }
+            // mouse-wheel scrolls the item / material list (both share _pickFirst; the short fit-list doesn't scroll)
+            if (!_fitList) { float wd = InputCompat.WheelDelta(Slot); if (wd != 0f) _pickFirst = Mathf.Max(0, _pickFirst - Mathf.RoundToInt(wd / 120f)); }
             if (InputCompat.MousePressed())
             {
                 if (_closeRect.Contains(m)) { _visible = false; return; }
@@ -305,22 +306,18 @@ namespace TbhDpsMeter
                 {
                     if (_backRect.Contains(m)) { _sockSlot = -1; return; }
                     for (int i = 0; i < _gradeRects.Count && i < _gradeKeys.Count; i++)
-                        if (_gradeRects[i].Contains(m)) { _pickGrade = _gradeKeys[i]; _pickerPage = 0; return; }
+                        if (_gradeRects[i].Contains(m)) { _pickGrade = _gradeKeys[i]; _pickFirst = 0; return; }
                     for (int i = 0; i < _statRects.Count && i < _statKeys.Count; i++)
-                        if (_statRects[i].Contains(m)) { _pickStat = _pickStat == _statKeys[i] ? "" : _statKeys[i]; _pickerPage = 0; return; }
-                    if (_ppPrev.Contains(m)) { _pickerPage = Mathf.Max(0, _pickerPage - 1); return; }
-                    if (_ppNext.Contains(m)) { _pickerPage++; return; }
+                        if (_statRects[i].Contains(m)) { _pickStat = _pickStat == _statKeys[i] ? "" : _statKeys[i]; _pickFirst = 0; return; }
                     for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
                         if (_pickRects[i].Contains(m)) { SetSocket(_sockSlot, _sockPos, _pickKeys[i]); _sockSlot = -1; return; }
                 }
                 else   // always-on gear picker for the focused slot
                 {
                     for (int i = 0; i < _gradeRects.Count && i < _gradeKeys.Count; i++)
-                        if (_gradeRects[i].Contains(m)) { _pickGrade = _gradeKeys[i]; _pickerPage = 0; return; }
+                        if (_gradeRects[i].Contains(m)) { _pickGrade = _gradeKeys[i]; _pickFirst = 0; return; }
                     for (int i = 0; i < _statRects.Count && i < _statKeys.Count; i++)
-                        if (_statRects[i].Contains(m)) { _pickStat = _pickStat == _statKeys[i] ? "" : _statKeys[i]; _pickerPage = 0; return; }
-                    if (_ppPrev.Contains(m)) { _pickerPage = Mathf.Max(0, _pickerPage - 1); return; }
-                    if (_ppNext.Contains(m)) { _pickerPage++; return; }
+                        if (_statRects[i].Contains(m)) { _pickStat = _pickStat == _statKeys[i] ? "" : _statKeys[i]; _pickFirst = 0; return; }
                     for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
                         if (_pickRects[i].Contains(m)) { SetSlot(_focus, _pickKeys[i]); return; }   // keep list open after a swap
                 }
@@ -753,17 +750,17 @@ namespace TbhDpsMeter
                 foreach (var g in list) foreach (var st in g.Stats) if (st.Stat == _pickStat) { fs.Add(g); break; }
                 list = fs;
             }
-            int per = 4; float maxRowH = lh * 3.9f, iconSz = lh * 1.7f;
-            int pages = Mathf.Max(1, (list.Count + per - 1) / per);
-            _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
-            int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
+            float maxRowH = lh * 3.9f, iconSz = lh * 1.7f;
+            float botY = _rect.y + _rect.height - Pad - lh;   // leave a row for the footer
+            _pickFirst = Mathf.Clamp(_pickFirst, 0, Mathf.Max(0, list.Count - 1));
             _pickRects.Clear(); _pickKeys.Clear();
             int curKey = (_load.TryGetValue(hero, out var arr) && slot < arr.Length) ? arr[slot] : 0;
             // the variant the hero actually owns in this slot (each item ships as 2 inherent-roll variants).
             int ownedKey = (_orig.TryGetValue(hero, out var oa2) && slot < oa2.Length) ? oa2[slot] : 0;
-            for (int i = 0; i < shown; i++)
+            int i = _pickFirst;
+            for (; i < list.Count; i++)
             {
-                var g = list[start + i];
+                var g = list[i];
                 string own = g.Key == ownedKey ? "<color=#7fffa0>✓</color> " : "";
                 string lvl = g.Level > 0 ? $" <size=10><color=#8a93a0>Lv{g.Level}</color></size>" : "";
                 string nameStr = $"{own}<color=#{GradeHex(g.Grade)}><b>{Nm(g.Key)}</b></color>{lvl}";
@@ -773,6 +770,7 @@ namespace TbhDpsMeter
                 float tx = ix + iconSz + 6, statW = iw - iconSz - 10;
                 float statH = _wrap.CalcHeight(new GUIContent(statStr), statW);
                 float thisH = Mathf.Clamp(lh + statH + 4, lh * 1.9f, maxRowH);   // size the row to its wrapped stats
+                if (cy + thisH > botY && i > _pickFirst) break;   // doesn't fit — stop (always show ≥1)
                 bool cur = g.Key == curKey;
                 if (cur) DrawRect(ix, cy, iw, thisH, new Color(0.30f, 0.45f, 0.75f, 0.30f)); else if ((i & 1) == 1) DrawRect(ix, cy, iw, thisH, new Color(1, 1, 1, 0.03f));
                 var tex = GearIconCache.Get(g.Key);
@@ -783,9 +781,20 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(tx, cy + lh - 1, statW, thisH - lh), statStr, _wrap);
                 _pickRects.Add(new Rect(ix, cy, iw, thisH - 1)); _pickKeys.Add(g.Key); cy += thisH;
             }
-            _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
-            GUI.Button(_ppPrev, "◀", _btn); GUI.Button(_ppNext, "▶", _btn);
-            GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<color=#9fb4cc>{_pickerPage + 1}/{pages}　{list.Count} {Loc.G("fit_count")}</color>", _dim);
+            DrawScrollFooter(ix, _rect.y + _rect.height - Pad - lh, iw, lh, _pickFirst, i, list.Count);
+        }
+
+        // footer for the scrollable pickers: shows the visible range / total and a thin scrollbar
+        private void DrawScrollFooter(float ix, float y, float iw, float lh, int first, int afterLast, int count)
+        {
+            GUI.Label(new Rect(ix, y, iw - 70, lh), $"<size=11><color=#9fb4cc>↕ {(count == 0 ? 0 : first + 1)}–{afterLast} / {count} {Loc.G("fit_count")}</color></size>", _dim);
+            if (count > 0 && afterLast - first < count)   // scrollbar only when not everything fits
+            {
+                float trackX = ix + iw - 60, trackW = 56, ty = y + lh * 0.45f;
+                DrawRect(trackX, ty, trackW, 4, new Color(1, 1, 1, 0.10f));
+                float frac = (float)(afterLast - first) / count, pos = (float)first / count;
+                DrawRect(trackX + trackW * pos, ty, Mathf.Max(6f, trackW * frac), 4, new Color(0.45f, 0.65f, 0.95f, 0.8f));
+            }
         }
 
         // useful stats first; any others present in the list are appended after these
@@ -959,21 +968,22 @@ namespace TbhDpsMeter
                 foreach (var mm in list) if (mm.Effect(gearGroup).Stat == _pickStat) f.Add(mm);
                 list = f;
             }
-            int per = 6; float rowH = lh * 1.95f, iconSz = lh * 1.55f;
-            int pages = Mathf.Max(1, (list.Count + per - 1) / per);
-            _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
-            int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
+            float rowH = lh * 1.95f, iconSz = lh * 1.55f;
+            float botY = _rect.y + _rect.height - Pad - lh;
+            _pickFirst = Mathf.Clamp(_pickFirst, 0, Mathf.Max(0, list.Count - 1));
             _pickRects.Clear(); _pickKeys.Clear();
-            // page 0 leads with an "empty / remove" option
-            if (_pickerPage == 0)
+            // the "empty / remove" option leads the list (only when scrolled to the top)
+            if (_pickFirst == 0)
             {
                 var er = new Rect(ix, cy, iw, lh - 1); DrawRect(ix, cy, iw, lh, new Color(1, 1, 1, 0.03f));
                 GUI.Label(new Rect(ix + 6, cy, iw - 8, lh), $"<color=#67707d>✕ {Loc.G("sock_empty")}</color>", _label);
                 _pickRects.Add(er); _pickKeys.Add(0); cy += lh;
             }
-            for (int i = 0; i < shown; i++)
+            int i = _pickFirst;
+            for (; i < list.Count; i++)
             {
-                var mm = list[start + i]; var e = mm.Effect(gearGroup);
+                if (cy + rowH > botY && i > _pickFirst) break;
+                var mm = list[i]; var e = mm.Effect(gearGroup);
                 var r = new Rect(ix, cy, iw, rowH - 1); if ((i & 1) == 1) DrawRect(ix, cy, iw, rowH, new Color(1, 1, 1, 0.03f));
                 float tx, tw;
                 if (_sockType == 'I')   // inscription options are stat picks, not items -> a ◆ glyph, no icon box
@@ -993,9 +1003,7 @@ namespace TbhDpsMeter
                 if (_sockType != 'I') GUI.Label(new Rect(tx, cy + lh, tw, lh), $"<color=#9aa3b0>{Nm(mm.Key)}</color>", _dim);
                 _pickRects.Add(r); _pickKeys.Add(mm.Key); cy += rowH;
             }
-            _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
-            GUI.Button(_ppPrev, "◀", _btn); GUI.Button(_ppNext, "▶", _btn);
-            GUI.Label(new Rect(ix + 64, cy, iw - 64, lh), $"<color=#9fb4cc>{_pickerPage + 1}/{pages}　{list.Count} {Loc.G("fit_count")}</color>", _dim);
+            DrawScrollFooter(ix, _rect.y + _rect.height - Pad - lh, iw, lh, _pickFirst, i, list.Count);
         }
     }
 }
