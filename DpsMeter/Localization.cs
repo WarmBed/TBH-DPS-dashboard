@@ -297,6 +297,7 @@ namespace TbhDpsMeter
             { "fit_orig",       new[] { "原", "Orig", "元", "原", "Orig" } },
             { "fit_new",        new[] { "新", "New", "新", "新", "Nuevo" } },
             { "fit_diff",       new[] { "差異", "Δ", "差", "差异", "Δ" } },
+            { "fit_current",    new[] { "目前", "Current", "現在", "目前", "Actual" } },
             { "fit_pickgear",   new[] { "選擇裝備", "Select Gear", "装備を選択", "选择装备", "Elegir equipo" } },
             { "fit_pickmat",    new[] { "選擇材料", "Select Material", "素材を選択", "选择材料", "Elegir material" } },
             { "fit_all",        new[] { "全部", "All", "全部", "全部", "Todos" } },
