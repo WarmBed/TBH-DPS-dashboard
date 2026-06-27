@@ -22,7 +22,9 @@ namespace TbhDpsMeter
     {
         public string Name;
         public double Value;
-        public Affix(string name, double value) { Name = name; Value = value; }
+        public string Mod;   // "FLAT" / "ADDITIVE" / "MULTIPLICATIVE" (from EnchantData.ModType); "" if unknown
+        public Affix(string name, double value) { Name = name; Value = value; Mod = ""; }
+        public Affix(string name, double value, string mod) { Name = name; Value = value; Mod = mod; }
     }
 
     /// <summary>One equipped item with its affixes/mods.</summary>

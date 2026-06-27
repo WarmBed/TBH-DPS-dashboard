@@ -158,7 +158,9 @@ namespace TbhDpsMeter
                                     int st = (int)Json.Num(Json.Get(m, "StatType"));
                                     double val = Json.Num(Json.Get(m, "Value"));
                                     if (st == 0 || val == 0) continue;
-                                    g.Affixes.Add(new Affix(StatName(st), val));
+                                    int mt = (int)Json.Num(Json.Get(m, "ModType"));   // 0 FLAT / 1 ADDITIVE / 2 MULTIPLICATIVE
+                                    string mod = mt == 1 ? "ADDITIVE" : (mt == 2 ? "MULTIPLICATIVE" : "FLAT");
+                                    g.Affixes.Add(new Affix(StatName(st), val, mod));
                                 }
                             list.Add(g);
                         }
