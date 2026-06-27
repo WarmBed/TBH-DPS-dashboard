@@ -425,6 +425,14 @@ namespace TbhDpsMeter
             if (live == 0) return sbA;   // no live anchor (no recent run) -> fall back to the gear aggregate
             return origA > 0.0001 ? live * (sbA / origA) : live + (sbA - origA);
         }
+        // the NEW display value: oDisp is the original in display units; scale gear edits in.
+        // gear with a prior contribution -> ratio (units cancel); gear added from zero -> additive, with the
+        // aggregate converted to display units (aggScale: 10 for ×10-stored percents, 1 for flat values).
+        private static double DispN(double oDisp, double origA, double newA, double aggScale)
+        {
+            if (origA > 1e-6) return oDisp * (newA / origA);
+            return oDisp + (newA - origA) / aggScale;
+        }
         // gear-rarity hex (no leading '#') — same palette as the gear-score panel, one source of truth.
         private static string GradeHex(string grade) => GearScoreOverlayBehaviour.GradeColor(grade);
 
@@ -528,13 +536,13 @@ namespace TbhDpsMeter
                 string rc = ratio > 1.001 ? "#7fffa0" : (ratio < 0.999 ? "#ff8a8a" : "#cdd5df");
                 GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_dps")}</color> <color=#eaf3ee><b>{FmtNum(shownDps)}</b></color>  " +
                     $"<color={rc}>(×{ratio:0.000} {Loc.G("fit_vs")})</color>   <size=10><color=#8a93a0>{Loc.G("fit_approx")}</color></size>", _label); cy += lh;
-                cy = StatBarRow(ix, cy, iw, lh, Loc.G("attack"), Sv(live, "attack"), Shown(Sv(live, "attack"), Sv(origAgg, "AttackDamage"), Sv(agg, "AttackDamage")), "0", "");
-                cy = StatBarRow(ix, cy, iw, lh, Loc.G("aspd"), Sv(live, "aspd"), Shown(Sv(live, "aspd"), Sv(origAgg, "AttackSpeed"), Sv(agg, "AttackSpeed")), "0.##", "");
-                cy = StatBarRow(ix, cy, iw, lh, Loc.G("critrate"), Sv(live, "critrate") * 100, Shown(Sv(live, "critrate"), Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance")) * 100, "0.#", "%");
-                cy = StatBarRow(ix, cy, iw, lh, Loc.G("critdmg"), Sv(live, "critdmg") * 100, Shown(Sv(live, "critdmg"), Sv(origAgg, "CriticalDamage"), Sv(agg, "CriticalDamage")) * 100, "0", "%");
-                cy = StatBarRow(ix, cy, iw, lh, Loc.G("AoE"), Sv(live, "AoE"), Shown(Sv(live, "AoE"), Sv(origAgg, "AreaOfEffect"), Sv(agg, "AreaOfEffect")), "0.#", "");
-                cy = StatBarRow(ix, cy, iw, lh, Loc.G("mspd"), Sv(live, "mspd") * 100, Shown(Sv(live, "mspd"), Sv(origAgg, "MovementSpeed"), Sv(agg, "MovementSpeed")) * 100, "0", "");
-                cy = StatBarRow(ix, cy, iw, lh, Loc.G("cdr"), Sv(live, "cdr") * 100, Shown(Sv(live, "cdr"), Sv(origAgg, "CooldownReduction"), Sv(agg, "CooldownReduction")) * 100, "0.#", "%");
+                double oAtk = Sv(live, "attack"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("attack"), oAtk, DispN(oAtk, Sv(origAgg, "AttackDamage"), Sv(agg, "AttackDamage"), 1), "0", "");
+                double oAsp = Sv(live, "aspd"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("aspd"), oAsp, DispN(oAsp, Sv(origAgg, "AttackSpeed"), Sv(agg, "AttackSpeed"), 1), "0.##", "");
+                double oCr = Sv(live, "critrate") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critrate"), oCr, DispN(oCr, Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance"), 10), "0.#", "%");
+                double oCd = Sv(live, "critdmg") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critdmg"), oCd, DispN(oCd, Sv(origAgg, "CriticalDamage"), Sv(agg, "CriticalDamage"), 10), "0", "%");
+                double oAoe = Sv(live, "AoE"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("AoE"), oAoe, DispN(oAoe, Sv(origAgg, "AreaOfEffect"), Sv(agg, "AreaOfEffect"), 1), "0.#", "");
+                double oMs = Sv(live, "mspd") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("mspd"), oMs, DispN(oMs, Sv(origAgg, "MovementSpeed"), Sv(agg, "MovementSpeed"), 1), "0", "");
+                double oCdr = Sv(live, "cdr") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("cdr"), oCdr, DispN(oCdr, Sv(origAgg, "CooldownReduction"), Sv(agg, "CooldownReduction"), 10), "0.#", "%");
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
                 // gear slots (click a row to view its sockets below; 換 swaps the item)
