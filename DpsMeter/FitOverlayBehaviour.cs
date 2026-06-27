@@ -461,7 +461,7 @@ namespace TbhDpsMeter
                 int[] sc0 = SlotSockets(CurHero, _focus);
                 int typesShown = (sc0[0] > 0 ? 1 : 0) + (sc0[1] > 0 ? 1 : 0) + (sc0[2] > 0 ? 1 : 0);
                 int sockRows = Mathf.Max(2, 1 + typesShown + sc0[0] + sc0[1] + sc0[2]);
-                int mainRows = 9 + 1 + SlotParts.Length + 1 + sockRows;   // DPS + header + 7 comparison rows + gear + sockets
+                int mainRows = 10 + 1 + SlotParts.Length + 1 + sockRows;   // DPS + header + 8 comparison rows + gear + sockets
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
@@ -552,6 +552,7 @@ namespace TbhDpsMeter
                 double oAsp = Sv(live, "aspd"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("aspd"), oAsp, DispN(oAsp, Sv(origAgg, "AttackSpeed"), Sv(agg, "AttackSpeed"), 1), "0.##", "");
                 double oCr = Sv(live, "critrate") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critrate"), oCr, DispN(oCr, Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance"), 10), "0.#", "%");
                 double oCd = Sv(live, "critdmg") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critdmg"), oCd, DispN(oCd, Sv(origAgg, "CriticalDamage"), Sv(agg, "CriticalDamage"), 10), "0", "%");
+                double oPh = Sv(live, "Phys%") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("PhysicalDamagePercent"), oPh, DispN(oPh, Sv(origAgg, "PhysicalDamagePercent"), Sv(agg, "PhysicalDamagePercent"), 10), "0.#", "%");
                 double oAoe = Sv(live, "AoE"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("AoE"), oAoe, DispN(oAoe, Sv(origAgg, "AreaOfEffect"), Sv(agg, "AreaOfEffect"), 1), "0.#", "");
                 double oMs = Sv(live, "mspd") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("mspd"), oMs, DispN(oMs, Sv(origAgg, "MovementSpeed"), Sv(agg, "MovementSpeed"), 1), "0", "");
                 double oCdr = Sv(live, "cdr") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("cdr"), oCdr, DispN(oCdr, Sv(origAgg, "CooldownReduction"), Sv(agg, "CooldownReduction"), 10), "0.#", "%");

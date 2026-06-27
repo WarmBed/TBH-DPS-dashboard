@@ -190,16 +190,23 @@ namespace TbhDpsMeter
 
         public static CombatStats ToCombat(Dictionary<string, double> agg)
         {
-            var c = new CombatStats();
+            var c = new CombatStats { DamageMult = 1.0 };
             if (agg != null)
             {
                 agg.TryGetValue("AttackDamage", out c.AttackDamage);
                 agg.TryGetValue("AttackSpeed", out c.AttackSpeed);
                 agg.TryGetValue("CriticalChance", out c.CritChance);
                 agg.TryGetValue("CriticalDamage", out c.CritDamage);
+                // increased-damage multiplier: these %-stats are stored ×10 and stack additively -> 1 + Σ/1000
+                double inc = Av(agg, "PhysicalDamagePercent") + Av(agg, "FireDamagePercent") + Av(agg, "ColdDamagePercent")
+                           + Av(agg, "LightningDamagePercent") + Av(agg, "ChaosDamagePercent")
+                           + Av(agg, "IncreaseMeleeDamage") + Av(agg, "IncreaseProjectileDamage")
+                           + Av(agg, "IncreaseAreaOfEffectDamage") + Av(agg, "IncreaseSummonDamage") + Av(agg, "DamageAddition");
+                c.DamageMult = 1.0 + inc / 1000.0;
             }
             return c;
         }
+        private static double Av(Dictionary<string, double> a, string k) { a.TryGetValue(k, out var v); return v; }
 
         /// <summary>Formula DPS for a loadout (placeholder formula until native decomp; used as a RATIO,
         /// anchored to measured DPS by the caller).</summary>

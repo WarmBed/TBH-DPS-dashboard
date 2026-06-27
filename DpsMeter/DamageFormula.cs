@@ -11,6 +11,7 @@ namespace TbhDpsMeter
         public double CritDamage;     // "critdmg"  multiplier (e.g. 3.57 = 357%)
         public double Multistrike;    // "Multistrike"
         public double ProjCount;      // "ProjCount"
+        public double DamageMult;     // increased-damage multiplier (物理/元素傷害%, 傷害強化…); 1 = none
     }
 
     /// <summary>Pure damage-formula module. TBH combat is client-authoritative (see memory
@@ -36,7 +37,8 @@ namespace TbhDpsMeter
         public static double ExpectedDps(CombatStats s)
         {
             // TODO(native-decomp): transcribe the pm-engine damage formula here.
-            return s.AttackDamage * s.AttackSpeed * CritMultiplier(s.CritChance, s.CritDamage);
+            double dm = s.DamageMult > 0 ? s.DamageMult : 1.0;   // increased-damage multiplier (1 when unset)
+            return s.AttackDamage * s.AttackSpeed * CritMultiplier(s.CritChance, s.CritDamage) * dm;
         }
     }
 }

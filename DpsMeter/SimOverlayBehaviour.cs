@@ -161,7 +161,7 @@ namespace TbhDpsMeter
                     if (snap == null || snap.Stats == null || snap.Stats.Count == 0 || snap.DamageDealt <= 0) continue;
                     int key;
                     if (!int.TryParse(snap.Character, out key)) continue;
-                    CombatStats cs;
+                    CombatStats cs = default;
                     cs.AttackDamage = StatVal(snap, "attack");
                     cs.AttackSpeed = StatVal(snap, "aspd");
                     cs.CritChance = StatVal(snap, "critrate");
