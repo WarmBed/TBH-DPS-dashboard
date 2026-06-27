@@ -387,15 +387,17 @@ namespace TbhDpsMeter
             _stylesReady = true;
         }
         private void DrawRect(float x, float y, float w, float h, Color c) { var p = GUI.color; GUI.color = c; GUI.DrawTexture(new Rect(x, y, w, h), _white); GUI.color = p; }
-        // one stat-comparison row: name | original → new (+Δ%) | rightward bar (green = gain, red = loss).
+        // one stat-comparison row, TABLE-aligned: name | 原 | 新 | Δ% | bar (fixed columns so values line up).
         private float StatBarRow(float x, float y, float w, float lh, string label, double o, double n, string fmt, string suffix)
         {
-            GUI.Label(new Rect(x, y, 50, lh), $"<color=#9fb4cc>{label}</color>", _dim);
             bool up = n > o + Math.Abs(o) * 5e-4 + 1e-9, down = n < o - Math.Abs(o) * 5e-4 - 1e-9;
             string nc = up ? "#7fffa0" : (down ? "#ff8a8a" : "#cdd5df");
-            string delta = (up || down) && o != 0 ? $" <size=10><color={nc}>{((n - o) / Math.Abs(o) * 100 >= 0 ? "+" : "")}{(n - o) / Math.Abs(o) * 100:0.#}%</color></size>" : "";
-            GUI.Label(new Rect(x + 52, y, 156, lh), $"<color=#8a93a0>{o.ToString(fmt)}{suffix}</color> <color=#6b7280>→</color> <color={nc}>{n.ToString(fmt)}{suffix}</color>{delta}", _dim);
-            float bx = x + 214, bw = w - 214, by = y + lh * 0.34f, bh = lh * 0.34f;
+            GUI.Label(new Rect(x, y, 66, lh), $"<color=#9fb4cc>{label}</color>", _dim);
+            GUI.Label(new Rect(x + 66, y, 60, lh), $"<color=#8a93a0>{o.ToString(fmt)}{suffix}</color>", _dim);    // 原
+            GUI.Label(new Rect(x + 128, y, 60, lh), $"<color={nc}>{n.ToString(fmt)}{suffix}</color>", _dim);      // 新
+            string delta = (up || down) && o != 0 ? $"{((n - o) / Math.Abs(o) * 100 >= 0 ? "+" : "")}{(n - o) / Math.Abs(o) * 100:0.#}%" : "";
+            GUI.Label(new Rect(x + 190, y, 46, lh), $"<size=10><color={nc}>{delta}</color></size>", _dim);        // Δ%
+            float bx = x + 240, bw = w - 240, by = y + lh * 0.34f, bh = lh * 0.34f;
             if (bw > 24)
             {
                 DrawRect(bx, by, bw, bh, new Color(1, 1, 1, 0.05f));   // track
@@ -459,7 +461,7 @@ namespace TbhDpsMeter
                 int[] sc0 = SlotSockets(CurHero, _focus);
                 int typesShown = (sc0[0] > 0 ? 1 : 0) + (sc0[1] > 0 ? 1 : 0) + (sc0[2] > 0 ? 1 : 0);
                 int sockRows = Mathf.Max(2, 1 + typesShown + sc0[0] + sc0[1] + sc0[2]);
-                int mainRows = 8 + 1 + SlotParts.Length + 1 + sockRows;   // DPS + 7 comparison bars + gear + sockets
+                int mainRows = 9 + 1 + SlotParts.Length + 1 + sockRows;   // DPS + header + 7 comparison rows + gear + sockets
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
@@ -541,6 +543,11 @@ namespace TbhDpsMeter
                 string rc = ratio > 1.001 ? "#7fffa0" : (ratio < 0.999 ? "#ff8a8a" : "#cdd5df");
                 GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_dps")}</color> <color=#eaf3ee><b>{FmtNum(shownDps)}</b></color>  " +
                     $"<color={rc}>(×{ratio:0.000} {Loc.G("fit_vs")})</color>   <size=10><color=#8a93a0>{Loc.G("fit_approx")}</color></size>", _label); cy += lh;
+                // table header: 原 / 新 / 差異
+                GUI.Label(new Rect(ix + 66, cy, 60, lh), $"<size=10><color=#6b7280>{Loc.G("fit_orig")}</color></size>", _dim);
+                GUI.Label(new Rect(ix + 128, cy, 60, lh), $"<size=10><color=#6b7280>{Loc.G("fit_new")}</color></size>", _dim);
+                GUI.Label(new Rect(ix + 190, cy, 46, lh), $"<size=10><color=#6b7280>{Loc.G("fit_diff")}</color></size>", _dim);
+                cy += lh * 0.72f;
                 double oAtk = Sv(live, "attack"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("attack"), oAtk, DispN(oAtk, Sv(origAgg, "AttackDamage"), Sv(agg, "AttackDamage"), 1), "0", "");
                 double oAsp = Sv(live, "aspd"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("aspd"), oAsp, DispN(oAsp, Sv(origAgg, "AttackSpeed"), Sv(agg, "AttackSpeed"), 1), "0.##", "");
                 double oCr = Sv(live, "critrate") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critrate"), oCr, DispN(oCr, Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance"), 10), "0.#", "%");
