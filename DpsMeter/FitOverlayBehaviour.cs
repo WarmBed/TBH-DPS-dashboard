@@ -575,10 +575,10 @@ namespace TbhDpsMeter
                             {
                                 // material key: edited cell knows it; a real cell borrows a matching material's icon
                                 int mk = (fEdited != null && pos < fEdited.Length && fEdited[pos] > 0) ? fEdited[pos] : MatCatalog.FindByEffect(tc[ti], fgg, eff.Stat, eff.Mod);
-                                var tex = mk > 0 ? GearIconCache.Get(mk) : null;
+                                var tex = (mk > 0 && tc[ti] != 'I') ? GearIconCache.Get(mk) : null;   // inscriptions have no item icon
                                 var ir = new Rect(ix + 15, cy + 1, lh - 3, lh - 3);
                                 if (tex != null) GUI.DrawTexture(ir, tex, ScaleMode.ScaleToFit);
-                                else { var pcc = GUI.color; GUI.color = new Color(0.45f, 0.65f, 0.62f, 0.5f); GUI.DrawTexture(ir, _white); GUI.color = pcc; }
+                                else GUI.Label(ir, "<color=#7fd0c2>◆</color>", _label);   // glyph instead of a broken square
                                 GUI.Label(new Rect(ix + 16 + lh, cy, iw - 22 - lh, lh), $"<size=11><color=#bcd0ea>{StatL(eff.Stat)} {StatVal(eff.Stat, eff.Mod, eff.Value)}</color></size>", _label);
                             }
                             else GUI.Label(new Rect(ix + 18, cy, iw - 24, lh), $"<size=11>◇ <color=#67707d>{Loc.G("sock_empty")}</color></size>", _label);
@@ -775,15 +775,22 @@ namespace TbhDpsMeter
             {
                 var mm = list[start + i]; var e = mm.Effect(gearGroup);
                 var r = new Rect(ix, cy, iw, rowH - 1); if ((i & 1) == 1) DrawRect(ix, cy, iw, rowH, new Color(1, 1, 1, 0.03f));
-                var tex = GearIconCache.Get(mm.Key);
-                var iconR = new Rect(ix + 3, cy + (rowH - iconSz) * 0.5f, iconSz, iconSz);
-                if (tex != null) GUI.DrawTexture(iconR, tex, ScaleMode.ScaleToFit);
-                else { var pc = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconR, _white); GUI.color = pc; }
-                float tx = ix + iconSz + 8, tw = iw - iconSz - 12;
+                float tx, tw;
+                if (_sockType == 'I')   // inscription options are stat picks, not items -> a ◆ glyph, no icon box
+                {
+                    GUI.Label(new Rect(ix + 6, cy + (rowH - lh) * 0.5f, 18, lh), "<color=#7fd0c2>◆</color>", _label);
+                    tx = ix + 24; tw = iw - 28;
+                }
+                else
+                {
+                    var tex = GearIconCache.Get(mm.Key);
+                    var iconR = new Rect(ix + 3, cy + (rowH - iconSz) * 0.5f, iconSz, iconSz);
+                    if (tex != null) GUI.DrawTexture(iconR, tex, ScaleMode.ScaleToFit);
+                    else { var pc = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconR, _white); GUI.color = pc; }
+                    tx = ix + iconSz + 8; tw = iw - iconSz - 12;
+                }
                 GUI.Label(new Rect(tx, cy + 2, tw, lh), $"<color=#eaf3ee>{StatL(e.Stat)} {StatVal(e.Stat, e.Mod, e.Value)}</color> <size=10><color=#8a93a0>T{mm.TierFor(gearGroup)}</color></size>", _label);
-                // inscription options aren't named items — label them by socket type instead of "#key"
-                string sub = _sockType == 'I' ? Loc.G("sock_inscribe") : Nm(mm.Key);
-                GUI.Label(new Rect(tx, cy + lh, tw, lh), $"<color=#9aa3b0>{sub}</color>", _dim);
+                if (_sockType != 'I') GUI.Label(new Rect(tx, cy + lh, tw, lh), $"<color=#9aa3b0>{Nm(mm.Key)}</color>", _dim);
                 _pickRects.Add(r); _pickKeys.Add(mm.Key); cy += rowH;
             }
             _ppPrev = new Rect(ix, cy, 26, lh - 2); _ppNext = new Rect(ix + 30, cy, 26, lh - 2);
