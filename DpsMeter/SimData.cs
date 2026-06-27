@@ -67,6 +67,18 @@ namespace TbhDpsMeter
         public static bool TryGet(string id, out StageInfo s) => _m.TryGetValue(id, out s);
     }
 
+    /// <summary>Precomputed per-stage context for the socket optimizer: the calibration (k, bCur) and the OTHER
+    /// party members' fixed streams, so each candidate only re-sims the focused hero's streams. Parallel arrays
+    /// indexed by farmed-stage. Plain class (not injected).</summary>
+    public class OptCtx
+    {
+        public int N;
+        public int[] Waves, Mpw;
+        public double[] EffHP, Boss, K, BCur, Floor, BM;
+        public List<AtkStream>[] Other;   // non-focused participants' current streams (fixed during optimization)
+        public bool[] FocIn, Valid;
+    }
+
     /// <summary>Turns a hero's final combat stats + equipped skills into the per-attack streams the iterative
     /// WaveSim consumes. auto = attack·critMult every 1/AttackSpeed; skill = attack·critMult·coeff every
     /// (BASEATTACK_COUNT: N/AttackSpeed; COOLDOWN: max(0.1, baseCD·(1−CDR))). AoE skills hit AoeTargets.</summary>
