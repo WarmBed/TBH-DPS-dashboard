@@ -359,6 +359,12 @@ namespace TbhDpsMeter
             string sign = v >= 0 ? "+" : "";
             return IsFlat(stat, mod) ? $"{sign}{v:0}" : $"{sign}{v / 10.0:0.#}%";
         }
+        // a material's roll RANGE (for the picker — candidates aren't rolled yet)
+        private static string StatValRange(string stat, string mod, double min, double max)
+        {
+            if (min == max) return StatVal(stat, mod, min);
+            return IsFlat(stat, mod) ? $"+{min:0}~{max:0}" : $"+{min / 10.0:0.#}~{max / 10.0:0.#}%";
+        }
         // a socketed material's effect on a gear group, formatted ("空" when the socket is empty)
         private static string SockEffect(int matKey, string gearGroup)
         {
@@ -839,7 +845,7 @@ namespace TbhDpsMeter
                     else { var pc = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(iconR, _white); GUI.color = pc; }
                     tx = ix + iconSz + 8; tw = iw - iconSz - 12;
                 }
-                GUI.Label(new Rect(tx, cy + 2, tw, lh), $"<color=#eaf3ee>{StatL(e.Stat)} {StatVal(e.Stat, e.Mod, e.Value)}</color> <size=10><color=#8a93a0>T{mm.TierFor(gearGroup)}</color></size>", _label);
+                GUI.Label(new Rect(tx, cy + 2, tw, lh), $"<color=#eaf3ee>{StatL(e.Stat)} {StatValRange(e.Stat, e.Mod, mm.MinFor(gearGroup), mm.MaxFor(gearGroup))}</color> <size=10><color=#8a93a0>T{mm.TierFor(gearGroup)}</color></size>", _label);
                 if (_sockType != 'I') GUI.Label(new Rect(tx, cy + lh, tw, lh), $"<color=#9aa3b0>{Nm(mm.Key)}</color>", _dim);
                 _pickRects.Add(r); _pickKeys.Add(mm.Key); cy += rowH;
             }

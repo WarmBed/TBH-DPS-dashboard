@@ -763,7 +763,7 @@ class Tests
         Check("[fit] bySlot RING=1", GearDatabase.BySlot("RING").Count == 1, GearDatabase.BySlot("RING").Count);
 
         // material catalog: matKey -> type + per-gear-group effect
-        string mj = "{\"110001\":{\"t\":\"D\",\"n\":\"mat1\",\"w\":[\"AttackDamage\",\"FLAT\",10,2],\"a\":[\"Armor\",\"FLAT\",5,1]}}";
+        string mj = "{\"110001\":{\"t\":\"D\",\"n\":\"mat1\",\"w\":[\"AttackDamage\",\"FLAT\",10,10,2],\"a\":[\"Armor\",\"FLAT\",5,5,1]}}";
         MatCatalog.Load(mj);
         var sm = MatCatalog.Get(110001);
         Check("[fit] mat type D", sm != null && sm.Type == 'D', sm != null ? sm.Type.ToString() : "null");

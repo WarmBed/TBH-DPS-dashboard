@@ -32,12 +32,15 @@ namespace TbhDpsMeter
         public int Key;
         public char Type;        // 'D' decoration / 'E' engraving / 'I' inscription
         public string NameKey = "";
-        public GearStat W, A, C; // effect on weapon / armor / accessory (default Stat=="" if none)
+        public GearStat W, A, C; // effect on weapon / armor / accessory (Value = mid, for aggregation)
+        public double WMin, WMax, AMin, AMax, CMin, CMax;   // roll range (for display)
         public int WTier, ATier, CTier;
         public bool HasW, HasA, HasC;
         public bool HasFor(string gearGroup) => gearGroup == "WEAPON" ? HasW : (gearGroup == "ARMOR" ? HasA : HasC);
         public GearStat Effect(string gearGroup) => gearGroup == "WEAPON" ? W : (gearGroup == "ARMOR" ? A : C);
         public int TierFor(string gearGroup) => gearGroup == "WEAPON" ? WTier : (gearGroup == "ARMOR" ? ATier : CTier);
+        public double MinFor(string gearGroup) => gearGroup == "WEAPON" ? WMin : (gearGroup == "ARMOR" ? AMin : CMin);
+        public double MaxFor(string gearGroup) => gearGroup == "WEAPON" ? WMax : (gearGroup == "ARMOR" ? AMax : CMax);
     }
 
     /// <summary>The fitting item/material database, parsed from the bundled fit_gear.json / fit_mats.json
@@ -141,20 +144,21 @@ namespace TbhDpsMeter
                     Type = (Json.Str(Json.Get(o, "t")) ?? "D")[0],
                     NameKey = Json.Str(Json.Get(o, "n")) ?? "",
                 };
-                ReadEff(Json.Get(o, "w"), ref m.W, ref m.WTier, ref m.HasW);
-                ReadEff(Json.Get(o, "a"), ref m.A, ref m.ATier, ref m.HasA);
-                ReadEff(Json.Get(o, "c"), ref m.C, ref m.CTier, ref m.HasC);
+                ReadEff(Json.Get(o, "w"), ref m.W, ref m.WMin, ref m.WMax, ref m.WTier, ref m.HasW);
+                ReadEff(Json.Get(o, "a"), ref m.A, ref m.AMin, ref m.AMax, ref m.ATier, ref m.HasA);
+                ReadEff(Json.Get(o, "c"), ref m.C, ref m.CMin, ref m.CMax, ref m.CTier, ref m.HasC);
                 _byKey[key] = m;
                 if (!_byType.TryGetValue(m.Type, out var l)) { l = new List<SockMat>(); _byType[m.Type] = l; }
                 l.Add(m);
             }
         }
-        private static void ReadEff(object node, ref GearStat g, ref int tier, ref bool has)
+        private static void ReadEff(object node, ref GearStat g, ref double mn, ref double mx, ref int tier, ref bool has)
         {
             var a = Json.Arr(node);
-            if (a == null || a.Count < 3) { has = false; return; }
-            g = new GearStat(Json.Str(a[0]) ?? "", Json.Str(a[1]) ?? "FLAT", Json.Num(a[2]));
-            tier = a.Count > 3 ? (int)Json.Num(a[3]) : 0;
+            if (a == null || a.Count < 4) { has = false; return; }   // [stat, mod, min, max, tier]
+            mn = Json.Num(a[2]); mx = Json.Num(a[3]);
+            g = new GearStat(Json.Str(a[0]) ?? "", Json.Str(a[1]) ?? "FLAT", (mn + mx) / 2.0);   // mid for aggregation
+            tier = a.Count > 4 ? (int)Json.Num(a[4]) : 0;
             has = true;
         }
         public static SockMat Get(int key) { _byKey.TryGetValue(key, out var m); return m; }
