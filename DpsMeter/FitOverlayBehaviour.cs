@@ -80,10 +80,12 @@ namespace TbhDpsMeter
         private readonly List<Rect> _focusRects = new List<Rect>();   // clickable gear rows (set focus)
         private int _picker = -1;       // slot whose item list is open (-1 = main view)
         private bool _fitList;          // load-fitting side panel open
-        private Rect _saveRect, _loadRect;
+        private bool _clearList;        // clear-time prediction side panel open
+        private Rect _saveRect, _loadRect, _clearRect;
         private readonly List<Rect> _fitLoadRects = new List<Rect>();   // per saved-fit "load" hitboxes
         private readonly List<Rect> _fitDelRects = new List<Rect>();    // per saved-fit "delete" hitboxes
         private readonly List<int> _fitIdx = new List<int>();           // parallel: store index per shown row
+        private List<RunRecord> _clearRuns;                             // runs cached while the clear-time panel is open
         private float _savedFlash;      // frame counter for the "已儲存" toast
         private int _pickerPage;
         private string _pickGrade = "";  // active grade-filter chip in the picker ("" = all)
@@ -256,14 +258,14 @@ namespace TbhDpsMeter
         {
             var cc = SlotSockets(CurHero, slot);
             _sockType = pos < cc[0] ? 'D' : (pos < cc[0] + cc[1] ? 'E' : 'I');
-            _sockSlot = slot; _sockPos = pos; _picker = -1; _fitList = false; _pickerPage = 0; _pickGrade = "";
+            _sockSlot = slot; _sockPos = pos; _picker = -1; _fitList = false; _clearList = false; _pickerPage = 0; _pickGrade = "";
         }
 
         private void HandlePointer()
         {
             if (GameUiState.MenuOpen()) { if (_dragging) { _dragging = false; InputCompat.ReleaseDrag(Slot); } return; }
             Vector2 m = UiScale.ToLocal(InputCompat.MouseGuiPos(), _rect.x, _rect.y, _scale);
-            if (!(_picker >= 0 || _sockSlot >= 0 || _fitList))   // width is owned by the side-column when it's open; don't resize then
+            if (!(_picker >= 0 || _sockSlot >= 0 || _fitList || _clearList))   // width is owned by the side-column when it's open; don't resize then
             {
                 float rw = _rect.width, dh = 0f;
                 var rr = _resize.Handle(Slot, m, ref rw, ref dh, 460f, Mathf.Max(460f, Screen.width * 0.95f), 0f, 0f, false);
@@ -276,7 +278,9 @@ namespace TbhDpsMeter
             {
                 if (_closeRect.Contains(m)) { _visible = false; return; }
                 if (_saveRect.Contains(m)) { SaveCurrentFit(); return; }
-                if (_loadRect.Contains(m)) { _fitList = !_fitList; _picker = -1; _sockSlot = -1; return; }
+                if (_loadRect.Contains(m)) { _fitList = !_fitList; _clearList = false; _picker = -1; _sockSlot = -1; return; }
+                if (_clearRect.Contains(m)) { _clearList = !_clearList; if (_clearList) _clearRuns = null; _fitList = false; _picker = -1; _sockSlot = -1; return; }
+                if (_clearList && _backRect.Contains(m)) { _clearList = false; return; }
                 if (_fitList)
                 {
                     if (_backRect.Contains(m)) { _fitList = false; return; }
@@ -310,7 +314,7 @@ namespace TbhDpsMeter
                 for (int i = 0; i < _tabRects.Count; i++)
                     if (_tabRects[i].Contains(m)) { _heroIdx = i; return; }   // keep the side-column open across heroes
                 for (int i = 0; i < _swapRects.Count; i++)
-                    if (_swapRects[i].Contains(m)) { _picker = i; _focus = i; _sockSlot = -1; _fitList = false; _pickerPage = 0; _pickGrade = ""; return; }
+                    if (_swapRects[i].Contains(m)) { _picker = i; _focus = i; _sockSlot = -1; _fitList = false; _clearList = false; _pickerPage = 0; _pickGrade = ""; return; }
                 for (int i = 0; i < _focusRects.Count; i++)
                     if (_focusRects[i].Contains(m)) { _focus = i; _sockSlot = -1; return; }
                 for (int i = 0; i < _sockRects.Count && i < _sockPosList.Count; i++)
@@ -459,7 +463,7 @@ namespace TbhDpsMeter
                 EnsureAssets(); if (!_placed) PlaceDefault(); if (!_loaded) Reload();
                 int fs = Fs; float lh = fs + 6;
                 // main column + optional item/material side-column to the RIGHT (expand, don't replace the page)
-                bool sideOpen = _picker >= 0 || _sockSlot >= 0 || _fitList;
+                bool sideOpen = _picker >= 0 || _sockSlot >= 0 || _fitList || _clearList;
                 float baseW = Mathf.Max(560f, Plugin.FitPanelWidth.Value);
                 _rect.width = baseW + (sideOpen ? PickerW : 0f);
                 float x = _rect.x, ix = x + Pad, w = _rect.width, iw = baseW - Pad * 2;
@@ -479,8 +483,9 @@ namespace TbhDpsMeter
                 GUI.Box(_rect, GUIContent.none, _box); PanelBorder.Draw(_rect);
                 float cy = _rect.y + Pad;
 
-                // title + save / load / reset / close
-                GUI.Label(new Rect(ix, cy, iw - 200, lh), $"{Loc.G("fit_title")} <size=10><color=#8a93a0>{GearDatabase.Count} {Loc.G("fit_count")}</color></size>", _title);
+                // title + clear-time / save / load / reset / close
+                GUI.Label(new Rect(ix, cy, iw - 248, lh), $"{Loc.G("fit_title")} <size=10><color=#8a93a0>{GearDatabase.Count} {Loc.G("fit_count")}</color></size>", _title);
+                _clearRect = new Rect(x + baseW - 28 - 56 - 4 - 38 - 4 - 38 - 4 - 54, cy - 1, 54, lh); GUI.Button(_clearRect, "⏱" + Loc.G("fit_clear"), _btn);
                 _saveRect = new Rect(x + baseW - 28 - 56 - 4 - 38 - 4 - 38, cy - 1, 38, lh); GUI.Button(_saveRect, "💾" + Loc.G("fit_save"), _btn);
                 _loadRect = new Rect(x + baseW - 28 - 56 - 4 - 38, cy - 1, 38, lh); GUI.Button(_loadRect, "📂" + Loc.G("fit_load"), _btn);
                 _resetRect = new Rect(x + baseW - 28 - 56, cy - 1, 56, lh); GUI.Button(_resetRect, Loc.G("sim_reset"), _btn);
@@ -651,6 +656,11 @@ namespace TbhDpsMeter
                     float pix = divX + 8, piw = PickerW - 16, pcy = _rect.y + Pad + lh;
                     if (_picker >= 0) DrawPicker(pix, pcy, piw, lh, hero);
                     else if (_sockSlot >= 0) DrawSockPicker(pix, pcy, piw, lh, fgg);
+                    else if (_clearList)
+                    {
+                        double mO = Sv(origAgg, "MovementSpeed"), mN = Sv(agg, "MovementSpeed");
+                        DrawClearList(pix, pcy, piw, lh, hero, ratio, mO > 0.0001 ? mN / mO : 1.0);
+                    }
                     else DrawFitList(pix, pcy, piw, lh, hero);
                 }
                 _resize.DrawGrip(_white, _rect);
@@ -759,6 +769,48 @@ namespace TbhDpsMeter
             foreach (var kv in f.Sockets) { var a = new int[kv.Value.Length]; Array.Copy(kv.Value, a, a.Length); sm[kv.Key] = a; }
             _fitList = false;
         }
+        // clear-time prediction: each stage's clear = active/F + idle/speed, where F = party-DPS factor from
+        // changing the focused hero (its DPS ratio × its damage share in that stage).
+        private void DrawClearList(float ix, float cy, float iw, float lh, int hero, double dpsRatio, double speedMult)
+        {
+            _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ " + Loc.G("fit_back"), _btn);
+            GUI.Label(new Rect(ix + 70, cy, iw - 70, lh), $"<color=#9fb4cc>{Loc.G("fit_cleartitle")}</color>", _label);
+            cy += lh;
+            GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#8a93a0>{HeroProbe.HeroName(hero)} · {Loc.G("fit_dps")} ×{dpsRatio:0.000}</color></size>", _dim); cy += lh;
+            GUI.Label(new Rect(ix, cy, 86, lh), $"<size=10><color=#6b7280>{Loc.G("stage_col")}</color></size>", _dim);
+            GUI.Label(new Rect(ix + 88, cy, 116, lh), $"<size=10><color=#6b7280>{Loc.G("fit_orig")} → {Loc.G("fit_new")}</color></size>", _dim);
+            GUI.Label(new Rect(ix + 206, cy, 60, lh), $"<size=10><color=#6b7280>{Loc.G("fit_clearcol")}</color></size>", _dim);
+            cy += lh;
+
+            var runs = _clearRuns ?? (_clearRuns = RunStore.LoadAll());
+            var byStage = new Dictionary<string, RunRecord>();
+            foreach (var r in runs) { if (r == null || string.IsNullOrEmpty(r.StageId) || r.ActiveSeconds <= 0) continue; byStage[r.StageId] = r; }
+            if (byStage.Count == 0) { GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#67707d>{Loc.G("fit_norun")}</color>", _label); return; }
+            var sids = new List<string>(byStage.Keys); sids.Sort(System.StringComparer.Ordinal);
+            string hk = hero.ToString();
+            double totSaved = 0, totBase = 0; int n = 0;
+            foreach (var sid in sids)
+            {
+                var r = byStage[sid];
+                double focusDmg = 0; if (r.Party != null) foreach (var snap in r.Party) if (snap != null && snap.Character == hk) { focusDmg = snap.DamageDealt; break; }
+                double share = r.Total > 0 ? focusDmg / r.Total : 0;
+                double F = 1.0 + share * (dpsRatio - 1.0);
+                var sim = ClearTimeSim.SimulateSplit(r.ActiveSeconds, r.IdleSeconds, F, speedMult);
+                string sc = sim.SavedSec > 0.05 ? "#7fffa0" : (sim.SavedSec < -0.05 ? "#ff8a8a" : "#cdd5df");
+                GUI.Label(new Rect(ix, cy, 86, lh), $"<size=11>{sid}</size>", _label);
+                GUI.Label(new Rect(ix + 88, cy, 116, lh), $"<size=11><color=#8a93a0>{sim.BaseClear:0}s</color> → <color={sc}>{sim.NewClear:0}s</color></size>", _label);
+                GUI.Label(new Rect(ix + 206, cy, 64, lh), $"<size=11><color={sc}>{(sim.SavedSec >= 0 ? "-" : "+")}{System.Math.Abs(sim.SavedSec):0.0}s</color></size>", _label);
+                cy += lh; totSaved += sim.SavedSec; totBase += sim.BaseClear; n++;
+            }
+            if (n > 0 && totBase > 0)
+            {
+                DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
+                double pct = totSaved / totBase * 100;
+                string sc = totSaved > 0.05 ? "#7fffa0" : "#cdd5df";
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "-" : "+")}{System.Math.Abs(pct):0.#}%</color>", _label);
+            }
+        }
+
         private void DrawFitList(float ix, float cy, float iw, float lh, int hero)
         {
             _backRect = new Rect(ix, cy, 60, lh - 2); GUI.Button(_backRect, "◀ " + Loc.G("fit_back"), _btn);
