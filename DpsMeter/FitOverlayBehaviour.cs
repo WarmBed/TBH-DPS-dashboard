@@ -67,6 +67,9 @@ namespace TbhDpsMeter
         private readonly Dictionary<int, int[]> _orig = new Dictionary<int, int[]>();  // real equipped (anchor)
         private readonly Dictionary<int, int[]> _load = new Dictionary<int, int[]>();   // sandbox (editable)
         private readonly Dictionary<int, double> _measDps = new Dictionary<int, double>();
+        // hero -> live computed character stats (short key -> value) from the newest run; the bench anchors
+        // its displayed stats to these so the current config matches the game's 屬性 panel exactly.
+        private readonly Dictionary<int, Dictionary<string, double>> _liveStats = new Dictionary<int, Dictionary<string, double>>();
         // hero -> slot -> material key per socket (deco sockets first, then engraving, then inscription)
         private readonly Dictionary<int, Dictionary<int, int[]>> _sockets = new Dictionary<int, Dictionary<int, int[]>>();
         private int _focus = 0;          // gear slot whose sockets are shown in the bench
@@ -138,7 +141,7 @@ namespace TbhDpsMeter
         {
             _seenVersion = RunStore.Version;
             FitDataStore.Ensure();
-            _heroes.Clear(); _orig.Clear(); _load.Clear(); _measDps.Clear(); _sockets.Clear(); RealSockets.Clear();
+            _heroes.Clear(); _orig.Clear(); _load.Clear(); _measDps.Clear(); _sockets.Clear(); RealSockets.Clear(); _liveStats.Clear();
             // current equipped gear per hero (ItemKey by slot0..slot9) + the item's REAL applied sockets
             try
             {
@@ -178,15 +181,21 @@ namespace TbhDpsMeter
             try
             {
                 var runs = RunStore.LoadAll();
-                for (int i = runs.Count - 1; i >= 0 && _measDps.Count == 0; i--)
+                for (int i = runs.Count - 1; i >= 0 && _liveStats.Count == 0; i--)
                 {
                     var r = runs[i]; if (r == null || r.Party == null) continue;
-                    double active = r.ActiveSeconds > 0 ? r.ActiveSeconds : r.Duration; if (active <= 0) continue;
+                    double active = r.ActiveSeconds > 0 ? r.ActiveSeconds : r.Duration;
                     foreach (var snap in r.Party)
                     {
-                        if (snap == null || snap.DamageDealt <= 0) continue;
+                        if (snap == null) continue;
                         int key; if (!int.TryParse(snap.Character, out key)) continue;
-                        _measDps[key] = snap.DamageDealt / active;
+                        if (snap.DamageDealt > 0 && active > 0) _measDps[key] = snap.DamageDealt / active;
+                        if (snap.Stats != null && snap.Stats.Count > 0)
+                        {
+                            var sm = new Dictionary<string, double>();
+                            foreach (var se in snap.Stats) sm[se.Key] = se.Value;
+                            _liveStats[key] = sm;
+                        }
                     }
                 }
             }
@@ -372,6 +381,13 @@ namespace TbhDpsMeter
         }
         private static string FmtNum(double v) { double a = Math.Abs(v); if (a >= 1e6) return (v / 1e6).ToString("0.#") + "M"; if (a >= 1e3) return (v / 1e3).ToString("0.#") + "K"; return v.ToString("0.#"); }
         private static double Sv(Dictionary<string, double> agg, string k) { double v = 0; if (agg != null) agg.TryGetValue(k, out v); return v; }
+        // anchor a live character stat to the gear-aggregate ratio: unchanged gear -> the live value (matches
+        // the game's 屬性 panel); edits scale it proportionally (additive when gear contributes 0 to that stat).
+        private static double Shown(double live, double origA, double sbA)
+        {
+            if (live == 0) return sbA;   // no live anchor (no recent run) -> fall back to the gear aggregate
+            return origA > 0.0001 ? live * (sbA / origA) : live + (sbA - origA);
+        }
         // gear-rarity hex (no leading '#') — same palette as the gear-score panel, one source of truth.
         private static string GradeHex(string grade) => GearScoreOverlayBehaviour.GradeColor(grade);
 
@@ -459,21 +475,23 @@ namespace TbhDpsMeter
                     }
                 }
                 var agg = FitCalc.LoadoutStatsWith(gearArr, sbLines);
+                var origAgg = FitCalc.LoadoutStatsWith(origArr, origLines);
                 double sbDps = FitCalc.LoadoutDpsWith(gearArr, sbLines);
                 double origDps = FitCalc.LoadoutDpsWith(origArr, origLines);
+                _liveStats.TryGetValue(hero, out var live);   // real character stats (anchor)
                 double meas; _measDps.TryGetValue(hero, out meas);
                 double ratio = origDps > 0 ? sbDps / origDps : 1.0;
                 double shownDps = meas > 0 ? meas * ratio : sbDps;
 
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("attack")}</color> <color=#eaf3ee>{Sv(agg, "AttackDamage"):0}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("aspd")}</color> <color=#eaf3ee>{Sv(agg, "AttackSpeed"):0.##}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("critrate")}</color> <color=#eaf3ee>{Sv(agg, "CriticalChance"):0.#}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("critdmg")}</color> <color=#eaf3ee>{Sv(agg, "CriticalDamage"):0.#}</color>", _dim); cy += lh;
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("AoE")}</color> <color=#eaf3ee>{Sv(agg, "AreaOfEffect"):0}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("mspd")}</color> <color=#eaf3ee>{Sv(agg, "MovementSpeed"):0.#}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("cdr")}</color> <color=#eaf3ee>{Sv(agg, "CooldownReduction"):0}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("Multistrike")}</color> <color=#eaf3ee>{Sv(agg, "Multistrike"):0}</color>   " +
-                    $"<color=#9fb4cc>{Loc.G("ProjCount")}</color> <color=#eaf3ee>{Sv(agg, "ProjectileCount"):0}</color>", _dim); cy += lh;
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("attack")}</color> <color=#eaf3ee>{Shown(Sv(live, "attack"), Sv(origAgg, "AttackDamage"), Sv(agg, "AttackDamage")):0}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("aspd")}</color> <color=#eaf3ee>{Shown(Sv(live, "aspd"), Sv(origAgg, "AttackSpeed"), Sv(agg, "AttackSpeed")):0.##}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("critrate")}</color> <color=#eaf3ee>{Shown(Sv(live, "critrate"), Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance")):0.##}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("critdmg")}</color> <color=#eaf3ee>{Shown(Sv(live, "critdmg"), Sv(origAgg, "CriticalDamage"), Sv(agg, "CriticalDamage")):0.##}</color>", _dim); cy += lh;
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("AoE")}</color> <color=#eaf3ee>{Shown(Sv(live, "AoE"), Sv(origAgg, "AreaOfEffect"), Sv(agg, "AreaOfEffect")):0.#}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("mspd")}</color> <color=#eaf3ee>{Shown(Sv(live, "mspd"), Sv(origAgg, "MovementSpeed"), Sv(agg, "MovementSpeed")):0}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("cdr")}</color> <color=#eaf3ee>{Shown(Sv(live, "cdr"), Sv(origAgg, "CooldownReduction"), Sv(agg, "CooldownReduction")):0.#}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("Multistrike")}</color> <color=#eaf3ee>{Shown(Sv(live, "Multistrike"), Sv(origAgg, "Multistrike"), Sv(agg, "Multistrike")):0.#}</color>   " +
+                    $"<color=#9fb4cc>{Loc.G("ProjCount")}</color> <color=#eaf3ee>{Shown(Sv(live, "ProjCount"), Sv(origAgg, "ProjectileCount"), Sv(agg, "ProjectileCount")):0.#}</color>", _dim); cy += lh;
                 string rc = ratio > 1.001 ? "#7fffa0" : (ratio < 0.999 ? "#ff8a8a" : "#cdd5df");
                 GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_dps")}</color> <color=#eaf3ee><b>{FmtNum(shownDps)}</b></color>  " +
                     $"<color={rc}>(×{ratio:0.000} {Loc.G("fit_vs")})</color>   <size=10><color=#8a93a0>{Loc.G("fit_approx")}</color></size>", _label); cy += lh;
