@@ -893,19 +893,8 @@ namespace TbhDpsMeter
             return h;
         }
 
-        // per-wave fixed overhead, read from the run's REAL per-wave durations (the stage-compare's "每波時間"):
-        // the fastest waves are ~all overhead (battle ≈ 0), so a low percentile is the floor DPS can't compress.
-        // Falls back to the decompiled spawn (0.8s) + stage-end (4.25s) when no per-wave data exists.
-        private static double FloorPerWave(List<float> wd, int waves)
-        {
-            if (wd == null || wd.Count == 0) return 0.8 + (waves > 0 ? 4.25 / waves : 0);
-            var s = new List<float>(wd); s.Sort();
-            int idx = Mathf.Clamp((int)(s.Count * 0.15f), 0, s.Count - 1);   // a representative fast (near-overhead) wave
-            return s[idx];
-        }
-
-        // run the iterative WaveSim for every farmed stage: split the measured clear into an EMPIRICAL per-wave
-        // floor (from real per-wave times) + a DPS-bound battle, then scale only the battle by the sandbox sim.
+        // run the iterative WaveSim for every farmed stage: split the measured clear into the DECOMPILED fixed
+        // floor (0.8s/wave spawn-gate + per-stage) + a DPS-bound battle, then scale only the battle by the sim.
         private void RecomputeSim(Dictionary<int, List<AtkStream>> cur, Dictionary<int, List<AtkStream>> sb)
         {
             _simStage.Clear(); _simBase.Clear(); _simNew.Clear(); _simFloor.Clear();
@@ -929,11 +918,14 @@ namespace TbhDpsMeter
                 // model the SAME number of waves the run actually did (a partial run shouldn't predict the whole
                 // stage); the end boss only counts on a full clear.
                 int waves = wc > 0 ? System.Math.Min(wc, st.Waves) : st.Waves;
-                double bossHp = waves >= st.Waves ? st.BossHp : 0;
-                // FLOOR from the REAL per-wave times: the fastest waves are ~pure overhead (spawn/approach/reorg/
-                // anim), so a low percentile of WaveDurations × waves is the part DPS can't compress. Only the
-                // remainder (battleMeasured) is DPS-bound, and that's what the iterative sim scales.
-                double floorTotal = System.Math.Min(measured, FloorPerWave(r.WaveDurations, waves) * waves);
+                bool fullClear = waves >= st.Waves;
+                double bossHp = fullClear ? st.BossHp : 0;
+                // FIXED floor = the DECOMPILED constants only: 0.8s spawn-gate per wave (no inter-wave gap) +
+                // per-stage one-time (≈2.0s intro slow-mo + 0.45s entry + 4.25s stage-end on a full clear). The
+                // rest — including the KILL CADENCE (landing N blows at your attack rate, the bulk of a wave) — is
+                // the BATTLE, which WaveSim models hit-by-hit: damage past one-shot stops helping, but attack speed
+                // / AoE still compress the cadence. (Move speed is 0: the party-speed value is dead code in-game.)
+                double floorTotal = System.Math.Min(measured, 0.8 * waves + 2.45 + (fullClear ? 4.25 : 0.0));
                 double battleMeasured = System.Math.Max(0.5, measured - floorTotal);
                 double k = StreamBuilder.CalibrateHpScale(waves, st.Mpw, st.EffHp, bossHp, curS, battleMeasured);
                 // show the battle RELATIVELY: newBattle = battleMeasured × (sandbox battle ÷ current battle).
