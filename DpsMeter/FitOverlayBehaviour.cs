@@ -271,7 +271,7 @@ namespace TbhDpsMeter
         {
             var cc = SlotSockets(CurHero, slot);
             _sockType = pos < cc[0] ? 'D' : (pos < cc[0] + cc[1] ? 'E' : 'I');
-            _sockSlot = slot; _sockPos = pos; _fitList = false; _pickerPage = 0; _pickGrade = "";
+            _sockSlot = slot; _sockPos = pos; _fitList = false; _pickerPage = 0; _pickGrade = ""; _pickStat = "";
         }
 
         private void HandlePointer()
@@ -304,6 +304,8 @@ namespace TbhDpsMeter
                     if (_backRect.Contains(m)) { _sockSlot = -1; return; }
                     for (int i = 0; i < _gradeRects.Count && i < _gradeKeys.Count; i++)
                         if (_gradeRects[i].Contains(m)) { _pickGrade = _gradeKeys[i]; _pickerPage = 0; return; }
+                    for (int i = 0; i < _statRects.Count && i < _statKeys.Count; i++)
+                        if (_statRects[i].Contains(m)) { _pickStat = _pickStat == _statKeys[i] ? "" : _statKeys[i]; _pickerPage = 0; return; }
                     if (_ppPrev.Contains(m)) { _pickerPage = Mathf.Max(0, _pickerPage - 1); return; }
                     if (_ppNext.Contains(m)) { _pickerPage++; return; }
                     for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
@@ -716,7 +718,9 @@ namespace TbhDpsMeter
             }
             cy = chy + chh + 3;
             // --- stat-filter chips: narrow to items that carry a chosen StatType (+傷害/+冷卻/+範圍/+攻速…) ---
-            DrawStatChips(ix, ref cy, iw, lh, list);
+            var statSet = new HashSet<string>();
+            foreach (var g in list) foreach (var st in g.Stats) statSet.Add(st.Stat);
+            DrawStatChips(ix, ref cy, iw, lh, statSet);
             if (_pickGrade != "")
             {
                 var fg = new List<GearTemplate>();
@@ -771,14 +775,12 @@ namespace TbhDpsMeter
             "CooldownReduction", "AreaOfEffect", "MovementSpeed", "MaxHp", "Armor",
         };
 
-        // stat-filter chips (single-select; click an active chip to clear). Derived from the stats actually
-        // present in the slot's items, so a hero only ever sees relevant filters.
-        private void DrawStatChips(float ix, ref float cy, float iw, float lh, List<GearTemplate> list)
+        // stat-filter chips (single-select; click an active chip to clear). `present` = the stats actually
+        // offered by the current list (gear base stats, or socket-material effects), so only relevant chips show.
+        private void DrawStatChips(float ix, ref float cy, float iw, float lh, HashSet<string> present)
         {
             _statRects.Clear(); _statKeys.Clear();
-            var present = new HashSet<string>();
-            foreach (var g in list) foreach (var st in g.Stats) present.Add(st.Stat);
-            if (present.Count == 0) return;
+            if (present == null || present.Count == 0) return;
             var ordered = new List<string>();
             foreach (var s in StatChipOrder) if (present.Remove(s)) ordered.Add(s);
             foreach (var s in present) ordered.Add(s);   // anything not in the priority list
@@ -921,10 +923,20 @@ namespace TbhDpsMeter
                 _gradeRects.Add(new Rect(chx, chy, cw, chh)); _gradeKeys.Add(key); chx += cw + gap;
             }
             cy = chy + chh + 3;
+            // --- stat-filter chips: narrow to materials granting a chosen stat (生命/範圍/移速/暴擊…) ---
+            var statSet = new HashSet<string>();
+            foreach (var mm in list) statSet.Add(mm.Effect(gearGroup).Stat);
+            DrawStatChips(ix, ref cy, iw, lh, statSet);
             if (_pickGrade != "")
             {
                 var f = new List<SockMat>();
                 foreach (var mm in list) if ("T" + mm.TierFor(gearGroup) == _pickGrade) f.Add(mm);
+                list = f;
+            }
+            if (_pickStat != "")
+            {
+                var f = new List<SockMat>();
+                foreach (var mm in list) if (mm.Effect(gearGroup).Stat == _pickStat) f.Add(mm);
                 list = f;
             }
             int per = 6; float rowH = lh * 1.95f, iconSz = lh * 1.55f;
