@@ -84,6 +84,7 @@ namespace TbhDpsMeter
         private readonly List<Rect> _fitDelRects = new List<Rect>();    // per saved-fit "delete" hitboxes
         private readonly List<int> _fitIdx = new List<int>();           // parallel: store index per shown row
         private readonly List<RunRecord> _clearStages = new List<RunRecord>();   // latest run per farmed stage (built on Reload), for the live clear-time block
+        private readonly HashSet<int> _partyHeroes = new HashSet<int>();          // heroKeys that fought in the newest run (the current party — no save field for it)
         // flat/percent split of the orig + sandbox loadouts, for live-anchored stat display (set each frame in OnGUI)
         private Dictionary<string, double> _fpFlatO, _fpPctO, _fpFlatN, _fpPctN;
         private float _savedFlash;      // frame counter for the "已儲存" toast
@@ -220,6 +221,14 @@ namespace TbhDpsMeter
                 foreach (var r in runs) { if (r == null || string.IsNullOrEmpty(r.StageId) || r.ActiveSeconds <= 0) continue; byStage[r.StageId] = r; }
                 var sids = new List<string>(byStage.Keys); sids.Sort(System.StringComparer.Ordinal);
                 foreach (var sid in sids) _clearStages.Add(byStage[sid]);
+                // current party = who fought in the newest run that has one (no deployed-party field in the save)
+                _partyHeroes.Clear();
+                for (int i = runs.Count - 1; i >= 0; i--)
+                {
+                    var r = runs[i]; if (r == null || r.Party == null || r.Party.Count == 0) continue;
+                    foreach (var snap in r.Party) if (snap != null && snap.DamageDealt > 0 && int.TryParse(snap.Character, out var phk)) _partyHeroes.Add(phk);
+                    break;
+                }
             }
             catch { }
             if (_heroIdx >= _heroes.Count) _heroIdx = 0;
@@ -529,11 +538,14 @@ namespace TbhDpsMeter
                 _tabRects.Clear(); float tx = ix;
                 for (int i = 0; i < _heroes.Count; i++)
                 {
-                    string nm = HeroProbe.HeroName(_heroes[i]); float tw = _btn.CalcSize(new GUIContent(nm)).x + 16;
+                    bool inParty = _partyHeroes.Contains(_heroes[i]);   // ★ marks the current party (recent-run participants)
+                    string nm = HeroProbe.HeroName(_heroes[i]);
+                    float tw = _btn.CalcSize(new GUIContent((inParty ? "★" : "") + nm)).x + 16;
                     var tr = new Rect(tx, cy, tw, lh - 2); bool sel = i == _heroIdx;
                     DrawRect(tr.x, tr.y, tr.width, tr.height, sel ? new Color(0.30f, 0.45f, 0.75f, 0.4f) : new Color(1, 1, 1, 0.05f));
                     DrawRect(tr.x, tr.y + tr.height - 2, tr.width, 2, ClassColor(_heroes[i]));
-                    GUI.Label(new Rect(tx + 8, cy, tw, lh), sel ? $"<b>{nm}</b>" : $"<color=#9aa3b0>{nm}</color>", _label);
+                    string star = inParty ? "<color=#ffd86b>★</color>" : "";
+                    GUI.Label(new Rect(tx + 8, cy, tw, lh), sel ? $"{star}<b>{nm}</b>" : $"{star}<color=#9aa3b0>{nm}</color>", _label);
                     _tabRects.Add(tr); tx += tw + 4;
                 }
                 cy += lh + 2;
@@ -597,11 +609,13 @@ namespace TbhDpsMeter
                 double oCdr = Sv(live, "cdr") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("cdr"), oCdr, DispFP(oCdr, "CooldownReduction", 10), "0.#", "%");
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
-                // live clear-time prediction: party-DPS factor from this hero's change × its per-stage share;
-                // idle time scales with the move-speed change (same display path as the 移速 row above)
+                // live clear-time prediction: party-DPS factor combines EVERY party member's edits (Σ share×ratio);
+                // idle time scales with the focused hero's move-speed change (same display path as the 移速 row)
                 double mspdLive = Sv(live, "mspd") * 100;
                 double speedMult = mspdLive > 0.0001 ? DispFP(mspdLive, "MovementSpeed", 1) / mspdLive : 1.0;
-                cy = DrawClearRows(ix, cy, iw, lh, hero, ratio, speedMult);
+                var ratioByHero = new Dictionary<int, double>();
+                foreach (var h in _heroes) ratioByHero[h] = (h == hero) ? ratio : HeroRatio(h);
+                cy = DrawClearRows(ix, cy, iw, lh, hero, ratioByHero, speedMult);
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
                 // gear slots (click a row to view its sockets below; 換 swaps the item)
@@ -853,16 +867,47 @@ namespace TbhDpsMeter
             foreach (var kv in f.Sockets) { var a = new int[kv.Value.Length]; Array.Copy(kv.Value, a, a.Length); sm[kv.Key] = a; }
             _fitList = false;
         }
-        // live clear-time prediction block, drawn in the top panel under the stats. Each stage's clear =
-        // active/F + idle/speed, where F = party-DPS factor from changing the focused hero (its DPS ratio ×
-        // its damage share in that stage). Returns the new cy.
-        private float DrawClearRows(float ix, float cy, float iw, float lh, int hero, double dpsRatio, double speedMult)
+        // DPS ratio (sandbox edits vs original) for ANY hero, from its stored loadout + socket edits. Used to
+        // combine every party member's changes in the clear-time, not just the focused hero's.
+        private double HeroRatio(int hero)
         {
-            GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>⏱ {Loc.G("fit_cleartitle")}</color> <size=10><color=#6b7280>{HeroProbe.HeroName(hero)} ·{Loc.G("fit_dps")}×{dpsRatio:0.00}</color></size>", _label);
+            if (!_load.TryGetValue(hero, out var gearArr) || !_orig.TryGetValue(hero, out var origArr)) return 1.0;
+            _sockets.TryGetValue(hero, out var hsock);
+            var sbLines = new Dictionary<int, List<GearStat>>();
+            var origLines = new Dictionary<int, List<GearStat>>();
+            for (int s = 0; s < SlotParts.Length; s++)
+            {
+                var realO = RealSockets.Get(hero, s);
+                if (realO != null) { var lo = new List<GearStat>(); foreach (var c in realO) if (!string.IsNullOrEmpty(c.Stat)) lo.Add(c); if (lo.Count > 0) origLines[s] = lo; }
+                bool unchanged = s < origArr.Length && s < gearArr.Length && origArr[s] == gearArr[s];
+                int[] edited = (hsock != null && hsock.TryGetValue(s, out var ea)) ? ea : null;
+                string gg = SlotGroup(hero, s);
+                var scc = SlotSockets(hero, s); int n = scc[0] + scc[1] + scc[2];
+                if (n > 0) { var ls = new List<GearStat>(); for (int p = 0; p < n; p++) { var e = FitCalc.EffectiveCell(realO, edited, p, gg, unchanged); if (!string.IsNullOrEmpty(e.Stat)) ls.Add(e); } if (ls.Count > 0) sbLines[s] = ls; }
+            }
+            double od = FitCalc.LoadoutDpsWith(origArr, origLines);
+            return od > 0 ? FitCalc.LoadoutDpsWith(gearArr, sbLines) / od : 1.0;
+        }
+
+        // live clear-time prediction block, drawn in the top panel under the stats. Each stage's clear =
+        // active/F + idle/speed, where the party-DPS factor F = Σ (each party member's damage share × its DPS
+        // ratio) — so editing ANY party member moves the predicted clear time. Returns the new cy.
+        private float DrawClearRows(float ix, float cy, float iw, float lh, int hero, Dictionary<int, double> ratioByHero, double speedMult)
+        {
+            // header: the party + each member's ratio (★ members), so it's clear the prediction is whole-party
+            string ph = "";
+            foreach (var h in _heroes)
+            {
+                if (!_partyHeroes.Contains(h)) continue;
+                double rr = ratioByHero != null && ratioByHero.TryGetValue(h, out var v) ? v : 1.0;
+                string col = rr > 1.001 ? "#7fffa0" : (rr < 0.999 ? "#ff8a8a" : "#9aa3b0");
+                ph += $"<color={col}>{HeroProbe.HeroName(h)}×{rr:0.00}</color>  ";
+            }
+            if (ph == "") { double rr = ratioByHero != null && ratioByHero.TryGetValue(hero, out var v) ? v : 1.0; ph = $"{HeroProbe.HeroName(hero)}×{rr:0.00}"; }
+            GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>⏱ {Loc.G("fit_cleartitle")}</color>  <size=10>{ph}</size>", _label);
             cy += lh;
             if (_clearStages.Count == 0) { GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#67707d>{Loc.G("fit_norun")}</color></size>", _label); return cy + lh; }
 
-            string hk = hero.ToString();
             float barX = ix + 290, barW = iw - 290;
             double maxBase = 0, totSaved = 0, totBase = 0;
             // pre-pass for bar scaling
@@ -874,9 +919,17 @@ namespace TbhDpsMeter
             if (maxBase <= 0) maxBase = 1;
             foreach (var r in _clearStages)
             {
-                double focusDmg = 0; if (r.Party != null) foreach (var snap in r.Party) if (snap != null && snap.Character == hk) { focusDmg = snap.DamageDealt; break; }
-                double share = r.Total > 0 ? focusDmg / r.Total : 0;
-                double F = 1.0 + share * (dpsRatio - 1.0);
+                // F = Σ share_h × ratio_h over this run's participants (+ unattributed damage at ratio 1)
+                double F = 0, sumShare = 0;
+                if (r.Party != null) foreach (var snap in r.Party)
+                {
+                    if (snap == null || !int.TryParse(snap.Character, out var hk2)) continue;
+                    double share = r.Total > 0 ? snap.DamageDealt / r.Total : 0;
+                    double rh = ratioByHero != null && ratioByHero.TryGetValue(hk2, out var rr) ? rr : 1.0;
+                    F += share * rh; sumShare += share;
+                }
+                F += System.Math.Max(0, 1 - sumShare);
+                if (F <= 1e-6) F = 1.0;
                 var sim = ClearTimeSim.SimulateSplit(r.ActiveSeconds, r.IdleSeconds, F, speedMult);
                 bool faster = sim.SavedSec > 0.05, slower = sim.SavedSec < -0.05;
                 string nc = faster ? "#7fffa0" : (slower ? "#ff8a8a" : "#cdd5df");
