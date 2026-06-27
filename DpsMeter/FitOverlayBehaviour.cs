@@ -374,9 +374,12 @@ namespace TbhDpsMeter
         }
         private void ResetLoadout()
         {
-            int h = CurHero;
-            if (_orig.TryGetValue(h, out var o)) { var c = new int[o.Length]; Array.Copy(o, c, o.Length); _load[h] = c; }
-            _sockets.Remove(h);
+            // reset the WHOLE sandbox (every hero's gear + sockets) back to the real equipped loadout
+            foreach (var h in _heroes)
+                if (_orig.TryGetValue(h, out var o)) { var c = new int[o.Length]; Array.Copy(o, c, o.Length); _load[h] = c; }
+            _sockets.Clear();
+            _pickGrade = ""; _pickStat = ""; _pickFirst = 0;
+            _simHash = -1;   // force the iterative clear-time to recompute from the reset gear
         }
         // ---- stat-line formatting (localized name + signed value) ----
         private static string StatL(string stat) => Loc.G(stat);   // StatType -> localized; falls back to the raw name
@@ -552,7 +555,7 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(ix, cy, iw - 200, lh), $"{Loc.G("fit_title")} <size=10><color=#8a93a0>{GearDatabase.Count} {Loc.G("fit_count")}</color></size>", _title);
                 _saveRect = new Rect(x + baseW - 28 - 56 - 4 - 38 - 4 - 38, cy - 1, 38, lh); GUI.Button(_saveRect, "💾" + Loc.G("fit_save"), _btn);
                 _loadRect = new Rect(x + baseW - 28 - 56 - 4 - 38, cy - 1, 38, lh); GUI.Button(_loadRect, "📂" + Loc.G("fit_load"), _btn);
-                _resetRect = new Rect(x + baseW - 28 - 56, cy - 1, 56, lh); GUI.Button(_resetRect, Loc.G("sim_reset"), _btn);
+                _resetRect = new Rect(x + baseW - 28 - 56, cy - 1, 56, lh); GUI.Button(_resetRect, Loc.G("fit_reset"), _btn);
                 _closeRect = new Rect(x + baseW - 26, cy - 2, 22, lh); GUI.Button(_closeRect, "✕", _btn);
                 if (_savedFlash > 0f) { _savedFlash -= 1f; GUI.Label(new Rect(ix + 200, cy, 120, lh), $"<color=#7fffa0>✓ {Loc.G("fit_saved")}</color>", _label); }
                 cy += lh;

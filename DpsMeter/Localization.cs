@@ -272,6 +272,7 @@ namespace TbhDpsMeter
             { "sim_avg_saved",  new[] { "平均省", "avg saved", "平均短縮", "平均省", "ahorro med." } },
             { "sim_best",       new[] { "最受惠", "best", "最大", "最受惠", "mejor" } },
             { "sim_reset",      new[] { "重置倍率", "Reset", "リセット", "重置倍率", "Reiniciar" } },
+            { "fit_reset",      new[] { "重置", "Reset", "リセット", "重置", "Reiniciar" } },
             { "sim_need_model", new[] { "還沒有實測時間,全部用估計;清過的關卡會自動改用真實 有效輸出/停輸出",
                 "No measured timing yet — all estimated; cleared stages switch to real active/idle",
                 "実測時間なし=全て推定。クリア済みは実測の有効/停止に自動切替",
