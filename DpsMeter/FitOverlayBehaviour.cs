@@ -573,7 +573,14 @@ namespace TbhDpsMeter
                     var gt = GearDatabase.ByKey(key);
                     string ghex = changed ? "7fffa0" : GradeHex(gt != null ? gt.Grade : "");
                     string slvl = (gt != null && gt.Level > 0) ? $" <size=10><color=#8a93a0>Lv{gt.Level}</color></size>" : "";
-                    GUI.Label(new Rect(ix + 48 + lh, cy, iw - 48 - lh - 56, lh), $"<color=#{ghex}>{Nm(key)}</color>{slvl}", _label);
+                    float nameW = iw - 48 - lh - 56;
+                    if (changed)
+                    {
+                        // a swapped slot shows the ORIGINAL on the right so old vs new are visible together
+                        nameW -= 156;
+                        GUI.Label(new Rect(ix + iw - 56 - 152, cy, 152, lh), $"<size=11><color=#6b7682>← 原 </color><color=#9aa3b0>{Nm(oa[s])}</color></size>", _label);
+                    }
+                    GUI.Label(new Rect(ix + 48 + lh, cy, nameW, lh), $"<color=#{ghex}>{Nm(key)}</color>{slvl}", _label);
                     bool open = _picker == s;
                     var sr = new Rect(ix + iw - 52, cy + 1, 50, lh - 3);
                     GUI.Button(sr, open ? "▸ " + Loc.G("fit_swap") : Loc.G("fit_swap"), _btn); _swapRects.Add(sr);
@@ -687,30 +694,12 @@ namespace TbhDpsMeter
                 foreach (var g in list) if (g.Grade == _pickGrade) fg.Add(g);
                 list = fg;
             }
-            float maxRowH = lh * 3.9f, iconSz = lh * 1.7f;
-            int curKey = (_load.TryGetValue(hero, out var arr) && _picker < arr.Length) ? arr[_picker] : 0;
-            // pinned: the item currently in this slot (the OLD), so candidates can be compared side by side
-            var curG = GearDatabase.ByKey(curKey);
-            if (curG != null)
-            {
-                float ch = lh * 2.2f;
-                DrawRect(ix, cy, iw, ch, new Color(0.85f, 0.70f, 0.30f, 0.16f));
-                var ctex = GearIconCache.Get(curKey);
-                var cir = new Rect(ix + 3, cy + 3, lh * 1.7f, lh * 1.7f);
-                if (ctex != null) GUI.DrawTexture(cir, ctex, ScaleMode.ScaleToFit);
-                else { var pc = GUI.color; GUI.color = new Color(1, 1, 1, 0.10f); GUI.DrawTexture(cir, _white); GUI.color = pc; }
-                float ctx = ix + lh * 1.8f + 4, ctw = iw - lh * 1.8f - 8;
-                GUI.Label(new Rect(ctx, cy + 1, ctw, lh), $"<color=#e8c45a>{Loc.G("fit_current")}</color> <color=#{GradeHex(curG.Grade)}><b>{Nm(curKey)}</b></color> <size=10><color=#8a93a0>Lv{curG.Level}</color></size>", _label);
-                string cstats = "";
-                foreach (var st in curG.Stats) cstats += $"{StatL(st.Stat)} {StatVal(st.Stat, st.Mod, st.Value)}　";
-                GUI.Label(new Rect(ctx, cy + lh - 1, ctw, ch - lh), $"<color=#9aa3b0>{cstats}</color>", _wrap);
-                cy += ch + 3;
-            }
-            int per = curG != null ? 3 : 4;
+            int per = 4; float maxRowH = lh * 3.9f, iconSz = lh * 1.7f;
             int pages = Mathf.Max(1, (list.Count + per - 1) / per);
             _pickerPage = Mathf.Clamp(_pickerPage, 0, pages - 1);
             int start = _pickerPage * per; int shown = Mathf.Min(per, list.Count - start);
             _pickRects.Clear(); _pickKeys.Clear();
+            int curKey = (_load.TryGetValue(hero, out var arr) && _picker < arr.Length) ? arr[_picker] : 0;
             // the variant the hero actually owns in this slot (each item ships as 2 inherent-roll variants).
             int ownedKey = (_orig.TryGetValue(hero, out var oa2) && _picker < oa2.Length) ? oa2[_picker] : 0;
             for (int i = 0; i < shown; i++)
