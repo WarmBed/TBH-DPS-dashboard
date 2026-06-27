@@ -118,7 +118,7 @@ namespace TbhDpsMeter
 
         void Awake()
         {
-            _rect.width = Mathf.Max(560, Plugin.FitPanelWidth.Value);
+            _rect.width = Mathf.Max(644, Plugin.FitPanelWidth.Value);
             _visible = Plugin.FitStartVisible.Value;
             PanelRegistry.Register("fit", 4, "⚒", () => Loc.G("fit_title"), KeyCode.None, () => _visible, v => _visible = v);
         }
@@ -147,11 +147,16 @@ namespace TbhDpsMeter
         {
             _seenVersion = RunStore.Version;
             FitDataStore.Ensure();
+            Dictionary<int, List<GearItem>> party = null;
+            try { party = SaveGearReader.ReadParty(); } catch { }
+            // the save read can come back empty for a frame right after a clear — keep the last loadout
+            // (and any in-progress edits) instead of blanking the bench.
+            if ((party == null || party.Count == 0) && _heroes.Count > 0) return;
             _heroes.Clear(); _orig.Clear(); _load.Clear(); _measDps.Clear(); _sockets.Clear(); RealSockets.Clear(); _liveStats.Clear();
             // current equipped gear per hero (ItemKey by slot0..slot9) + the item's REAL applied sockets
             try
             {
-                var party = SaveGearReader.ReadParty();
+                if (party != null)
                 foreach (var kv in party)
                 {
                     var arr = new int[SlotParts.Length];
@@ -260,9 +265,9 @@ namespace TbhDpsMeter
             if (!(_picker >= 0 || _sockSlot >= 0 || _fitList))   // width is owned by the side-column when it's open; don't resize then
             {
                 float rw = _rect.width, dh = 0f;
-                var rr = _resize.Handle(Slot, m, ref rw, ref dh, 460f, Mathf.Max(460f, Screen.width * 0.95f), 0f, 0f, false);
+                var rr = _resize.Handle(Slot, m, ref rw, ref dh, 644f, Mathf.Max(644f, Screen.width * 0.95f), 0f, 0f, false);
                 _rect.width = rw;
-                if (rr == PanelResize.Result.Reset) { _rect.width = 560f; Plugin.FitPanelWidth.Value = _rect.width; return; }
+                if (rr == PanelResize.Result.Reset) { _rect.width = 644f; Plugin.FitPanelWidth.Value = _rect.width; return; }
                 if (rr == PanelResize.Result.Committed) { Plugin.FitPanelWidth.Value = _rect.width; return; }
                 if (rr != PanelResize.Result.None) return;
             }
@@ -382,24 +387,27 @@ namespace TbhDpsMeter
             _stylesReady = true;
         }
         private void DrawRect(float x, float y, float w, float h, Color c) { var p = GUI.color; GUI.color = c; GUI.DrawTexture(new Rect(x, y, w, h), _white); GUI.color = p; }
-        // one stat-comparison row: name | original → new (+Δ%) | rightward bar (green = gain, red = loss).
+        // one stat-comparison row: name | original → new (+Δ%) | two stacked bars (原 grey / 新 green|red).
         private float StatBarRow(float x, float y, float w, float lh, string label, double o, double n, string fmt, string suffix)
         {
-            GUI.Label(new Rect(x, y, 50, lh), $"<color=#9fb4cc>{label}</color>", _dim);
+            GUI.Label(new Rect(x, y, 66, lh), $"<color=#9fb4cc>{label}</color>", _dim);
             bool up = n > o + Math.Abs(o) * 5e-4 + 1e-9, down = n < o - Math.Abs(o) * 5e-4 - 1e-9;
             string nc = up ? "#7fffa0" : (down ? "#ff8a8a" : "#cdd5df");
             string delta = (up || down) && o != 0 ? $" <size=10><color={nc}>{((n - o) / Math.Abs(o) * 100 >= 0 ? "+" : "")}{(n - o) / Math.Abs(o) * 100:0.#}%</color></size>" : "";
-            GUI.Label(new Rect(x + 52, y, 156, lh), $"<color=#8a93a0>{o.ToString(fmt)}{suffix}</color> <color=#6b7280>→</color> <color={nc}>{n.ToString(fmt)}{suffix}</color>{delta}", _dim);
-            float bx = x + 214, bw = w - 214, by = y + lh * 0.34f, bh = lh * 0.34f;
-            if (bw > 24)
+            GUI.Label(new Rect(x + 68, y, 152, lh), $"<color=#8a93a0>{o.ToString(fmt)}{suffix}</color> <color=#6b7280>→</color> <color={nc}>{n.ToString(fmt)}{suffix}</color>{delta}", _dim);
+            float bx = x + 224, bw = w - 224;
+            if (bw > 44)
             {
-                DrawRect(bx, by, bw, bh, new Color(1, 1, 1, 0.05f));   // track
                 double maxS = Math.Max(Math.Max(Math.Abs(o), Math.Abs(n)), 1e-9);
                 float oF = Mathf.Clamp01((float)(o / maxS)), nF = Mathf.Clamp01((float)(n / maxS));
-                DrawRect(bx, by, bw * Math.Min(oF, nF), bh, new Color(0.45f, 0.50f, 0.58f, 0.6f));   // shared base
-                if (up) DrawRect(bx + bw * oF, by, bw * (nF - oF), bh, new Color(0.40f, 0.85f, 0.50f, 0.92f));   // gain
-                else if (down) DrawRect(bx + bw * nF, by, bw * (oF - nF), bh, new Color(0.90f, 0.42f, 0.42f, 0.92f)); // loss
-                DrawRect(bx + bw * oF - 1f, y + lh * 0.24f, 1.5f, lh * 0.54f, new Color(1, 1, 1, 0.5f));   // original tick
+                float bw2 = bw - 18, bh = lh * 0.30f;
+                GUI.Label(new Rect(bx, y + lh * 0.04f, 16, lh * 0.46f), "<size=9><color=#8a93a0>原</color></size>", _label);
+                DrawRect(bx + 18, y + lh * 0.13f, bw2, bh, new Color(1, 1, 1, 0.05f));
+                DrawRect(bx + 18, y + lh * 0.13f, bw2 * oF, bh, new Color(0.58f, 0.63f, 0.70f, 0.85f));   // original
+                GUI.Label(new Rect(bx, y + lh * 0.50f, 16, lh * 0.46f), "<size=9><color=#9fb4cc>新</color></size>", _label);
+                DrawRect(bx + 18, y + lh * 0.55f, bw2, bh, new Color(1, 1, 1, 0.05f));
+                Color ncol = up ? new Color(0.40f, 0.85f, 0.50f, 0.95f) : (down ? new Color(0.90f, 0.42f, 0.42f, 0.95f) : new Color(0.58f, 0.63f, 0.70f, 0.85f));
+                DrawRect(bx + 18, y + lh * 0.55f, bw2 * nF, bh, ncol);   // new (coloured by change)
             }
             return y + lh;
         }
@@ -444,9 +452,9 @@ namespace TbhDpsMeter
             {
                 EnsureAssets(); if (!_placed) PlaceDefault(); if (!_loaded) Reload();
                 int fs = Fs; float lh = fs + 6;
-                // main column + optional item/material side-column to the RIGHT (expand, don't replace the page)
+                // LEFT stats column + MAIN gear column, + optional picker side-column to the RIGHT.
                 bool sideOpen = _picker >= 0 || _sockSlot >= 0 || _fitList;
-                float baseW = Mathf.Max(560f, Plugin.FitPanelWidth.Value);
+                float baseW = Mathf.Max(644f, Plugin.FitPanelWidth.Value);
                 _rect.width = baseW + (sideOpen ? PickerW : 0f);
                 float x = _rect.x, ix = x + Pad, w = _rect.width, iw = baseW - Pad * 2;
 
@@ -454,7 +462,8 @@ namespace TbhDpsMeter
                 int[] sc0 = SlotSockets(CurHero, _focus);
                 int typesShown = (sc0[0] > 0 ? 1 : 0) + (sc0[1] > 0 ? 1 : 0) + (sc0[2] > 0 ? 1 : 0);
                 int sockRows = Mathf.Max(2, 1 + typesShown + sc0[0] + sc0[1] + sc0[2]);
-                int mainRows = 8 + 1 + SlotParts.Length + 1 + sockRows;   // DPS + 7 comparison bars + gear + sockets
+                int gearRows = SlotParts.Length + 1 + sockRows;
+                int mainRows = Math.Max(9, gearRows);   // stats column (DPS+7) vs gear column, side by side
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
@@ -534,16 +543,21 @@ namespace TbhDpsMeter
                 // DPS (prominent) + a before→after comparison list with rightward difference bars.
                 // O = the real current value (anchor); N = the value after the sandbox edits.
                 string rc = ratio > 1.001 ? "#7fffa0" : (ratio < 0.999 ? "#ff8a8a" : "#cdd5df");
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("fit_dps")}</color> <color=#eaf3ee><b>{FmtNum(shownDps)}</b></color>  " +
-                    $"<color={rc}>(×{ratio:0.000} {Loc.G("fit_vs")})</color>   <size=10><color=#8a93a0>{Loc.G("fit_approx")}</color></size>", _label); cy += lh;
-                double oAtk = Sv(live, "attack"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("attack"), oAtk, DispN(oAtk, Sv(origAgg, "AttackDamage"), Sv(agg, "AttackDamage"), 1), "0", "");
-                double oAsp = Sv(live, "aspd"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("aspd"), oAsp, DispN(oAsp, Sv(origAgg, "AttackSpeed"), Sv(agg, "AttackSpeed"), 1), "0.##", "");
-                double oCr = Sv(live, "critrate") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critrate"), oCr, DispN(oCr, Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance"), 10), "0.#", "%");
-                double oCd = Sv(live, "critdmg") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("critdmg"), oCd, DispN(oCd, Sv(origAgg, "CriticalDamage"), Sv(agg, "CriticalDamage"), 10), "0", "%");
-                double oAoe = Sv(live, "AoE"); cy = StatBarRow(ix, cy, iw, lh, Loc.G("AoE"), oAoe, DispN(oAoe, Sv(origAgg, "AreaOfEffect"), Sv(agg, "AreaOfEffect"), 1), "0.#", "");
-                double oMs = Sv(live, "mspd") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("mspd"), oMs, DispN(oMs, Sv(origAgg, "MovementSpeed"), Sv(agg, "MovementSpeed"), 1), "0", "");
-                double oCdr = Sv(live, "cdr") * 100; cy = StatBarRow(ix, cy, iw, lh, Loc.G("cdr"), oCdr, DispN(oCdr, Sv(origAgg, "CooldownReduction"), Sv(agg, "CooldownReduction"), 10), "0.#", "%");
-                DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
+                // ===== LEFT column: DPS + before→after comparison bars =====
+                float colTop = cy;
+                float statW = 322f, gapc = 14f, mxg = ix + statW + gapc, gearW = (ix + iw) - mxg;
+                GUI.Label(new Rect(ix, cy, statW, lh), $"<color=#9fb4cc>{Loc.G("fit_dps")}</color> <color=#eaf3ee><b>{FmtNum(shownDps)}</b></color>  <color={rc}>(×{ratio:0.000})</color>", _label); cy += lh;
+                double oAtk = Sv(live, "attack"); cy = StatBarRow(ix, cy, statW, lh, Loc.G("attack"), oAtk, DispN(oAtk, Sv(origAgg, "AttackDamage"), Sv(agg, "AttackDamage"), 1), "0", "");
+                double oAsp = Sv(live, "aspd"); cy = StatBarRow(ix, cy, statW, lh, Loc.G("aspd"), oAsp, DispN(oAsp, Sv(origAgg, "AttackSpeed"), Sv(agg, "AttackSpeed"), 1), "0.##", "");
+                double oCr = Sv(live, "critrate") * 100; cy = StatBarRow(ix, cy, statW, lh, Loc.G("critrate"), oCr, DispN(oCr, Sv(origAgg, "CriticalChance"), Sv(agg, "CriticalChance"), 10), "0.#", "%");
+                double oCd = Sv(live, "critdmg") * 100; cy = StatBarRow(ix, cy, statW, lh, Loc.G("critdmg"), oCd, DispN(oCd, Sv(origAgg, "CriticalDamage"), Sv(agg, "CriticalDamage"), 10), "0", "%");
+                double oAoe = Sv(live, "AoE"); cy = StatBarRow(ix, cy, statW, lh, Loc.G("AoE"), oAoe, DispN(oAoe, Sv(origAgg, "AreaOfEffect"), Sv(agg, "AreaOfEffect"), 1), "0.#", "");
+                double oMs = Sv(live, "mspd") * 100; cy = StatBarRow(ix, cy, statW, lh, Loc.G("mspd"), oMs, DispN(oMs, Sv(origAgg, "MovementSpeed"), Sv(agg, "MovementSpeed"), 1), "0", "");
+                double oCdr = Sv(live, "cdr") * 100; cy = StatBarRow(ix, cy, statW, lh, Loc.G("cdr"), oCdr, DispN(oCdr, Sv(origAgg, "CooldownReduction"), Sv(agg, "CooldownReduction"), 10), "0.#", "%");
+                float leftEnd = cy;
+                // vertical divider, then switch the remaining draws to the MAIN gear column
+                DrawRect(mxg - gapc * 0.5f, colTop, 1, (_rect.y + _rect.height - Pad) - colTop, new Color(1, 1, 1, 0.12f));
+                ix = mxg; iw = gearW; cy = colTop;
 
                 // gear slots (click a row to view its sockets below; 換 swaps the item)
                 _swapRects.Clear(); _focusRects.Clear();
@@ -615,6 +629,7 @@ namespace TbhDpsMeter
                         }
                     }
                 }
+                cy = Math.Max(leftEnd, cy);   // panel extent = the taller of the two columns
 
                 // side column: the item / socket-material list expands to the RIGHT of the bench
                 if (sideOpen)
