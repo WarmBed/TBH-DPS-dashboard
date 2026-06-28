@@ -1067,6 +1067,23 @@ namespace TbhDpsMeter
             catch (Exception e) { Plugin.Logger?.LogWarning("ReadStats: " + e.Message); }
         }
 
+        /// <summary>Read a live unit's real MaxHp (effective HP) via the same obfuscated stat chain used for
+        /// heroes. Works on a Monster Unit (the chain is Unit-level). 0 if the chain isn't resolved yet. Used by
+        /// the real-combat probe to capture the TRUE monster HP instead of the calibrated CSV value.</summary>
+        public static double ReadUnitMaxHp(object unit)
+        {
+            if (unit == null) return 0;
+            try
+            {
+                if (_statUnitAccessor == null || _statBlockAccessor == null || _statGetter == null) return 0;
+                var vi = InvokeNoArg(unit, _statUnitAccessor); if (vi == null) return 0;
+                var block = InvokeNoArg(vi, _statBlockAccessor); if (block == null) return 0;
+                double v = InvokeGetter(block, EnumVal(5));   // MaxHp
+                return double.IsNaN(v) ? 0 : v;
+            }
+            catch { return 0; }
+        }
+
         /// <summary>Walks unit -> vi -> yu, resolving the obfuscated chain by return-type shape on first use
         /// and caching it. Returns the live stat block (yu) or null. Re-scans each call until it resolves so
         /// a not-yet-initialised hero early in a run self-heals on the next snapshot.</summary>
