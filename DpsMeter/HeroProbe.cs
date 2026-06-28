@@ -1070,15 +1070,36 @@ namespace TbhDpsMeter
         /// <summary>Read a live unit's real MaxHp (effective HP) via the same obfuscated stat chain used for
         /// heroes. Works on a Monster Unit (the chain is Unit-level). 0 if the chain isn't resolved yet. Used by
         /// the real-combat probe to capture the TRUE monster HP instead of the calibrated CSV value.</summary>
+        static Type _muType; static System.Reflection.MemberInfo _muUnit, _muBlock; static System.Reflection.MethodInfo _muGetter;
         public static double ReadUnitMaxHp(object unit)
         {
             if (unit == null) return 0;
             try
             {
-                if (_statUnitAccessor == null || _statBlockAccessor == null || _statGetter == null) return 0;
-                var vi = InvokeNoArg(unit, _statUnitAccessor); if (vi == null) return 0;
-                var block = InvokeNoArg(vi, _statBlockAccessor); if (block == null) return 0;
-                double v = InvokeGetter(block, EnumVal(5));   // MaxHp
+                var t = unit.GetType();
+                if (t != _muType || _muGetter == null)   // resolve the chain on the MONSTER's own type (hero's accessors don't invoke on it)
+                {
+                    _muType = t; _muUnit = _muBlock = null; _muGetter = null;
+                    foreach (var a1 in NoArgRefAccessors(t))
+                    {
+                        if (!IsGameClass(AccessorType(a1))) continue;
+                        object vi = null;
+                        foreach (var a2 in NoArgRefAccessors(AccessorType(a1)))
+                        {
+                            if (!HasStatGetter(AccessorType(a2))) continue;
+                            if (vi == null) vi = InvokeNoArg(unit, a1);
+                            if (vi == null) break;
+                            var g = PickStatGetter(InvokeNoArg(vi, a2));
+                            if (g == null) continue;
+                            _muUnit = a1; _muBlock = a2; _muGetter = g; break;
+                        }
+                        if (_muGetter != null) break;
+                    }
+                }
+                if (_muGetter == null) return 0;
+                var vi2 = InvokeNoArg(unit, _muUnit); if (vi2 == null) return 0;
+                var block = InvokeNoArg(vi2, _muBlock); if (block == null) return 0;
+                double v = InvokeGetter(block, _muGetter, EnumVal(5));   // MaxHp
                 return double.IsNaN(v) ? 0 : v;
             }
             catch { return 0; }
