@@ -128,7 +128,7 @@ namespace TbhDpsMeter
 
         private Rect _closeRect, _resetRect, _optRect, _backRect, _clearHeadRect;
         private int _optFlash;                 // frames to show the "已最佳化" tick
-        private const float OptW = 236f;       // width of the left optimization-changelog panel
+        private const float OptW = 300f;       // width of the left optimization-changelog panel
         private Rect _optLogClose;             // ✕ to dismiss the changelog
         private readonly List<OptChange> _optLog = new List<OptChange>();   // what 最佳化 changed (for the left list)
         // socket-optimizer working state (set before the greedy loop so OptEvalTotal can read it without lambdas)
@@ -1115,8 +1115,8 @@ namespace TbhDpsMeter
                 float icx = ix + 8;
                 if (ch.Type != 'I') { var tex = GearIconCache.Get(ch.MatKey); if (tex != null) GUI.DrawTexture(new Rect(icx, cy + 1, lh - 2, lh - 2), tex, ScaleMode.ScaleToFit); }
                 else GUI.Label(new Rect(icx, cy, 14, lh), "<color=#7fd0c2>◆</color>", _label);
-                float tx = icx + lh + 2;
-                GUI.Label(new Rect(tx, cy, ix + iw - tx, lh), $"<size=10><color=#7d8aa0>{SlotL(ch.Slot)}·{tn}</color>  <color=#eaf3ee>{StatL(e.Stat)} {StatValRange(e.Stat, e.Mod, mm.MinFor(ch.Gg), mm.MaxFor(ch.Gg))}</color></size>", _label);
+                float tx = icx + lh + 4;
+                GUI.Label(new Rect(tx, cy, ix + iw - tx, lh), $"<size=11><color=#8a93a0>{SlotL(ch.Slot)}·{tn}</color></size>  <size=13><color=#eaf3ee>{StatL(e.Stat)} {StatValRange(e.Stat, e.Mod, mm.MinFor(ch.Gg), mm.MaxFor(ch.Gg))}</color></size>", _label);
                 cy += lh;
             }
         }
