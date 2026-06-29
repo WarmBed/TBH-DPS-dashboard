@@ -648,21 +648,21 @@ namespace TbhDpsMeter
                     foreach (var sk in snap.Skills) if (sk.Key > 0) { kl.Add(sk.Key); ll.Add(sk.Level); }
                     if (kl.Count > 0) { skKeys[hk] = kl; skLvl[hk] = ll; }
                 }
-                // per-hero DPS ratios + attack streams (focused uses the _fp set above; others via HeroRatio)
+                // per-hero DPS ratios + per-hero kill-RATES (focused uses the _fp set above; others via HeroRatio)
                 var ratioByHero = new Dictionary<int, double>();
-                var curStreams = new Dictionary<int, List<AtkStream>>();
-                var sbStreams = new Dictionary<int, List<AtkStream>>();
-                AddStreams(hero, live, skKeys, skLvl, curStreams, sbStreams);
+                var curRates = new Dictionary<int, double>();
+                var sbRates = new Dictionary<int, double>();
+                AddRates(hero, live, skKeys, skLvl, curRates, sbRates);
                 foreach (var hh in _heroes)
                 {
                     if (hh == hero) { ratioByHero[hh] = ratio; continue; }
                     ratioByHero[hh] = HeroRatio(hh);   // sets _fp* for hh
                     _liveStats.TryGetValue(hh, out var lvh);
-                    AddStreams(hh, lvh, skKeys, skLvl, curStreams, sbStreams);
+                    AddRates(hh, lvh, skKeys, skLvl, curRates, sbRates);
                 }
-                int simHash = StreamHash(sbStreams);
+                int simHash = RateHash(sbRates);
                 bool showClear = Plugin.FitShowClear == null || Plugin.FitShowClear.Value;
-                if (showClear && simHash != _simHash) { _simHash = simHash; RecomputeSim(curStreams, sbStreams); }   // heavy sim only when visible
+                if (showClear && simHash != _simHash) { _simHash = simHash; RecomputeSim(curRates, sbRates); }   // heavy sim only when visible
                 cy = DrawClearRows(ix, cy, iw, lh, hero, ratioByHero);
                 DrawRect(ix, cy, iw, 1, new Color(1, 1, 1, 0.12f)); cy += 3;
 
@@ -903,29 +903,23 @@ namespace TbhDpsMeter
             return od > 0 ? DamageFormula.ExpectedDps(nc) / od : 1.0;
         }
 
-        // build a hero's CURRENT (live) and SANDBOX (DispFP'd) attack streams. Must be called with this hero's
-        // _fp* fields already set (so DispFP gives its sandbox stats). Skills come from its run snapshot.
-        private void AddStreams(int hero, Dictionary<string, double> live,
+        // build a hero's CURRENT (live) and SANDBOX (DispFP'd) per-hero KILL-RATE (kills/sec) via the serialized
+        // action-queue model (StreamBuilder.HeroKillRate — decompiled Unit.gqh: one action/frame, cooldown skills
+        // suppress the auto, budget ≈ AttackSpeed). Damage-INDEPENDENT on one-shot farm content, so only
+        // AttackSpeed (action budget), CooldownReduction (caster's skill cadence) and AreaOfEffect (targets/cast)
+        // move it — folded as the sandbox/current AoE ratio. Must be called with this hero's _fp* already set.
+        private void AddRates(int hero, Dictionary<string, double> live,
             Dictionary<int, List<int>> skKeys, Dictionary<int, List<int>> skLvl,
-            Dictionary<int, List<AtkStream>> cur, Dictionary<int, List<AtkStream>> sb)
+            Dictionary<int, double> cur, Dictionary<int, double> sb)
         {
             if (live == null) return;
-            double a = Sv(live, "attack"), asp = Sv(live, "aspd"), cr = Sv(live, "critrate"), cd = Sv(live, "critdmg"), cdr = Sv(live, "cdr");
+            double asp = Sv(live, "aspd"), cdr = Sv(live, "cdr");
             skKeys.TryGetValue(hero, out var ks); skLvl.TryGetValue(hero, out var ls);
-            // 物理傷害% folds into per-hit damage; units cancel in bSb/bCur so only the DELTA matters. But Phys%
-            // ONLY amplifies PHYSICAL damage — a hero with ~0 live 物傷% deals elemental damage (e.g. the mage),
-            // so Phys% does nothing for them (don't let the optimizer put 物理傷害 on a caster). AoE/範圍 scales
-            // how many monsters an AoE cast hits (was hardcoded to 2).
-            double curPh = Sv(live, "Phys%");
-            double curDmg = 1.0 + curPh;
-            double sbDmg = curPh > 0.01 ? 1.0 + DispFP(curPh * 100, "PhysicalDamagePercent", 10) / 100.0 : curDmg;
             double curAoe = Sv(live, "AoE");
             double aoeMult = curAoe > 1e-6 ? DispFP(curAoe, "AreaOfEffect", 1) / curAoe : 1.0;
-            cur[hero] = StreamBuilder.Build(hero, a, asp, cr, cd, cdr, ks, ls, 1.0);
-            sb[hero] = StreamBuilder.Build(hero,
-                DispFP(a, "AttackDamage", 1) * (sbDmg / (curDmg > 1e-6 ? curDmg : 1.0)), DispFP(asp, "AttackSpeed", 1),
-                DispFP(cr * 100, "CriticalChance", 10) / 100.0, DispFP(cd * 100, "CriticalDamage", 10) / 100.0,
-                DispFP(cdr * 100, "CooldownReduction", 10) / 100.0, ks, ls, aoeMult);
+            cur[hero] = StreamBuilder.HeroKillRate(hero, asp, cdr, ks, ls, 1.0);
+            sb[hero] = StreamBuilder.HeroKillRate(hero,
+                DispFP(asp, "AttackSpeed", 1), DispFP(cdr * 100, "CooldownReduction", 10) / 100.0, ks, ls, aoeMult);
         }
 
         // build a hero's flat/percent loadout aggregates (_fpO from the REAL sockets, _fpN from _sockets[hero]'s
@@ -958,17 +952,18 @@ namespace TbhDpsMeter
         private double OptEvalTotal()
         {
             BuildHeroFP(_optFocused);
-            var tmpCur = new Dictionary<int, List<AtkStream>>(); var tmpSb = new Dictionary<int, List<AtkStream>>();
-            AddStreams(_optFocused, _optLive, _optSkKeys, _optSkLvl, tmpCur, tmpSb);
-            tmpSb.TryGetValue(_optFocused, out var sb); if (sb == null) sb = new List<AtkStream>();
+            var tmpCur = new Dictionary<int, double>(); var tmpSb = new Dictionary<int, double>();
+            AddRates(_optFocused, _optLive, _optSkKeys, _optSkLvl, tmpCur, tmpSb);
+            tmpSb.TryGetValue(_optFocused, out var focRate);
             var c = _optCtx; double total = 0;
             for (int i = 0; i < c.N; i++)
             {
                 if (!c.Valid[i]) continue;
                 if (!c.FocIn[i]) { total += c.Floor[i] + c.BM[i]; continue; }   // focused absent → its sockets can't change this stage
-                var combined = new List<AtkStream>(c.Other[i]); combined.AddRange(sb);
-                double sbRate = WaveSim.CadenceRate(combined);   // active(kill) scales by 1/rate; BCur = current party rate
-                total += c.Floor[i] + c.BM[i] * (sbRate > 1e-9 && c.BCur[i] > 1e-9 ? c.BCur[i] / sbRate : 1.0);
+                // party speed-up = Σ share·(rate/cur): only the focused hero's rate changes (others fixed at f=1).
+                double f = c.FocCur[i] > 1e-9 ? focRate / c.FocCur[i] : 1.0;
+                double sbRel = (1.0 - c.FocShare[i]) + c.FocShare[i] * f;   // current = 1.0 (shares sum to 1)
+                total += c.Floor[i] + c.BM[i] * (sbRel > 1e-9 ? 1.0 / sbRel : 1.0);
             }
             return total;
         }
@@ -1004,33 +999,32 @@ namespace TbhDpsMeter
                 foreach (var sk in snap.Skills) if (sk.Key > 0) { kl.Add(sk.Key); ll.Add(sk.Level); }
                 if (kl.Count > 0) { _optSkKeys[hk] = kl; _optSkLvl[hk] = ll; }
             }
-            // every hero's CURRENT streams (live stats; independent of sockets) + the shared per-stage baseline
-            var curBy = new Dictionary<int, List<AtkStream>>();
+            // every hero's CURRENT kill-rate (live stats; independent of sockets) + the shared per-stage baseline
+            var curBy = new Dictionary<int, double>();
             foreach (var h in _heroes)
             {
                 _liveStats.TryGetValue(h, out var lv);
-                if (lv == null) { curBy[h] = new List<AtkStream>(); continue; }
+                if (lv == null) { curBy[h] = 0; continue; }
                 _optSkKeys.TryGetValue(h, out var ks); _optSkLvl.TryGetValue(h, out var ls);
-                curBy[h] = StreamBuilder.Build(h, Sv(lv, "attack"), Sv(lv, "aspd"), Sv(lv, "critrate"), Sv(lv, "critdmg"), Sv(lv, "cdr"), ks, ls, 1.0);
+                curBy[h] = StreamBuilder.HeroKillRate(h, Sv(lv, "aspd"), Sv(lv, "cdr"), ks, ls, 1.0);
             }
             int n = _clearStages.Count;
-            var bWaves = new int[n]; var bMpw = new int[n]; var bEffHP = new double[n]; var bBoss = new double[n];
-            var bK = new double[n]; var bBCur = new double[n]; var bFloor = new double[n]; var bBM = new double[n];
+            var bFloor = new double[n]; var bBM = new double[n]; var bTot = new double[n];
             var bParts = new List<int>[n]; var bValid = new bool[n];
+            var bDmg = new Dictionary<int, double>[n];   // per stage: hero → measured DamageDealt (for kill-share)
             for (int i = 0; i < n; i++)
             {
                 var r = _clearStages[i];
                 double active = Math.Max(0, r.ActiveSeconds), idle = Math.Max(0, r.IdleSeconds);
-                var all = new List<AtkStream>(); var parts = new List<int>();
+                var parts = new List<int>(); var dmg = new Dictionary<int, double>(); double tot = 0;
                 if (r.Party != null) foreach (var snap in r.Party)
                 {
-                    if (snap == null || snap.DamageDealt <= 0 || !int.TryParse(snap.Character, out var hk) || !curBy.TryGetValue(hk, out var cs)) continue;
-                    all.AddRange(cs); parts.Add(hk);
+                    if (snap == null || snap.DamageDealt <= 0 || !int.TryParse(snap.Character, out var hk) || !curBy.ContainsKey(hk)) continue;
+                    parts.Add(hk); dmg[hk] = snap.DamageDealt; tot += snap.DamageDealt;
                 }
-                if (all.Count == 0 || active <= 0.1) { bValid[i] = false; continue; }
-                // CADENCE model: floor = idle (approach), battle = active (kill), scaled by the party kill-RATE.
-                bFloor[i] = idle; bBM[i] = active; bBCur[i] = WaveSim.CadenceRate(all);
-                bParts[i] = parts; bValid[i] = true;
+                if (parts.Count == 0 || active <= 0.1 || tot <= 0) { bValid[i] = false; continue; }
+                // CADENCE model: floor = idle (approach), battle = active (kill); active scales by 1/Σ share·(rate/cur).
+                bFloor[i] = idle; bBM[i] = active; bParts[i] = parts; bDmg[i] = dmg; bTot[i] = tot; bValid[i] = true;
             }
             // optimise each hero that fights in at least one stage
             foreach (int h in _heroes)
@@ -1038,13 +1032,14 @@ namespace TbhDpsMeter
                 _liveStats.TryGetValue(h, out _optLive); if (_optLive == null) continue;
                 bool any = false; for (int i = 0; i < n; i++) if (bValid[i] && bParts[i].Contains(h)) { any = true; break; }
                 if (!any) continue;
-                var c = new OptCtx { N = n, Waves = bWaves, Mpw = bMpw, EffHP = bEffHP, Boss = bBoss, K = bK, BCur = bBCur, Floor = bFloor, BM = bBM, Other = new List<AtkStream>[n], FocIn = new bool[n], Valid = bValid };
+                double hCur = curBy.TryGetValue(h, out var cr) ? cr : 0;
+                var c = new OptCtx { N = n, Floor = bFloor, BM = bBM, FocShare = new double[n], FocCur = new double[n], FocIn = new bool[n], Valid = bValid };
                 for (int i = 0; i < n; i++)
                 {
                     if (!bValid[i]) continue;
-                    var other = new List<AtkStream>(); bool fin = false;
-                    foreach (int p in bParts[i]) { if (p == h) fin = true; else if (curBy.TryGetValue(p, out var cs)) other.AddRange(cs); }
-                    c.Other[i] = other; c.FocIn[i] = fin;
+                    bool fin = bParts[i].Contains(h);
+                    c.FocIn[i] = fin; c.FocCur[i] = hCur;
+                    c.FocShare[i] = fin ? bDmg[i][h] / bTot[i] : 0;   // focused hero's measured kill-share this stage
                 }
                 _optCtx = c; _optFocused = h;
                 for (int pass = 0; pass < 3; pass++)
@@ -1121,17 +1116,17 @@ namespace TbhDpsMeter
             }
         }
 
-        // cheap change-hash over the sandbox streams, so RecomputeSim only runs when an edit changes something.
-        private static int StreamHash(Dictionary<int, List<AtkStream>> sb)
+        // cheap change-hash over the sandbox kill-rates, so RecomputeSim only runs when an edit changes something.
+        private static int RateHash(Dictionary<int, double> sb)
         {
             int h = 17;
-            foreach (var kv in sb) { h = h * 31 + kv.Key; foreach (var s in kv.Value) h = h * 31 + (int)s.PerHit + (int)(s.Interval * 137) + s.Targets; }
+            foreach (var kv in sb) { h = h * 31 + kv.Key; h = h * 31 + (int)(kv.Value * 1000.0); }
             return h;
         }
 
         // run the iterative WaveSim for every farmed stage: split the measured clear into the DECOMPILED fixed
         // floor (0.8s/wave spawn-gate + per-stage) + a DPS-bound battle, then scale only the battle by the sim.
-        private void RecomputeSim(Dictionary<int, List<AtkStream>> cur, Dictionary<int, List<AtkStream>> sb)
+        private void RecomputeSim(Dictionary<int, double> cur, Dictionary<int, double> sb)
         {
             _simStage.Clear(); _simBase.Clear(); _simNew.Clear(); _simFloor.Clear(); _simRatio.Clear(); _simCadence.Clear();
             foreach (var r in _clearStages)
@@ -1139,27 +1134,30 @@ namespace TbhDpsMeter
                 double active = System.Math.Max(0, r.ActiveSeconds), idle = System.Math.Max(0, r.IdleSeconds);
                 double measured = active + idle;
                 _simStage.Add(r.StageId); _simBase.Add(measured); _simRatio.Add(1.0); _simCadence.Add(true);
-                var curS = new List<AtkStream>(); var sbS = new List<AtkStream>();
+                double sbRel = 0, totDmg = 0; int parts = 0;
                 if (r.Party != null) foreach (var snap in r.Party)
+                    if (snap != null && snap.DamageDealt > 0 && int.TryParse(snap.Character, out var hk) && cur.ContainsKey(hk)) totDmg += snap.DamageDealt;
+                if (r.Party != null && totDmg > 0) foreach (var snap in r.Party)
                 {
-                    if (snap == null || snap.DamageDealt <= 0 || !int.TryParse(snap.Character, out var hk)) continue;
-                    if (cur.TryGetValue(hk, out var cs)) curS.AddRange(cs);
-                    if (sb.TryGetValue(hk, out var ss)) sbS.AddRange(ss);
+                    if (snap == null || snap.DamageDealt <= 0 || !int.TryParse(snap.Character, out var hk) || !cur.TryGetValue(hk, out var cs)) continue;
+                    parts++;
+                    double f = cs > 1e-9 && sb.TryGetValue(hk, out var ss) ? ss / cs : 1.0;   // this hero's speed-up
+                    sbRel += (snap.DamageDealt / totDmg) * f;                                  // weighted by kill-share
                 }
-                if (curS.Count == 0 || sbS.Count == 0 || active <= 0.1)
-                {   // no stream data / no measured active-kill phase → can't model; leave unchanged
+                if (parts == 0 || active <= 0.1)
+                {   // no rate data / no measured active-kill phase → can't model; leave unchanged
                     _simNew.Add(measured); _simFloor.Add(idle);
                     continue;
                 }
-                // CADENCE model (verified by the 100%-coverage stat audit + live measurement): on one-shot farm
-                // content the clear splits into ACTIVE (≈ the run's active seconds = the kill phase, bound by the
-                // party KILL-RATE = casts/sec × targets) + IDLE (≈ monsters spawning + walking into attack range
-                // while the hero idles = the approach floor). Per-hit DAMAGE changes NOTHING (every cast already
-                // one-shots); only AttackSpeed/CDR (Interval) and AoE/Multistrike/ProjectileCount (Targets) raise
-                // the kill-rate. Move speed is dead; attack RANGE would cut idle but isn't quantified yet, so idle
-                // is held fixed here. newActive = active × (currentRate ÷ sandboxRate).
-                double curRate = WaveSim.CadenceRate(curS), sbRate = WaveSim.CadenceRate(sbS);
-                double ratio = (curRate > 1e-9 && sbRate > 1e-9) ? curRate / sbRate : 1.0;
+                // CADENCE model (verified by the 100%-coverage stat audit + the decompiled serialized action queue):
+                // on one-shot farm content the clear splits into ACTIVE (the run's active seconds = the kill phase) +
+                // IDLE (monsters spawning + walking into attack range while the hero idles = the approach floor).
+                // ACTIVE scales by 1 / Σ_hero share_h·(rate_h/curRate_h): each hero's kill-rate change (from its
+                // serialized auto/cooldown queue) weighted by its MEASURED damage share — so the per-class lever is
+                // right (ranger=AttackSpeed, mage=CDR) AND a buffing support that barely kills can't dominate the mix.
+                // Per-hit DAMAGE changes NOTHING (one-shot). Move speed is dead; RANGE would cut idle but isn't
+                // quantified yet, so idle is held fixed. curRel = Σ share = 1, so ratio = 1 / sbRel.
+                double ratio = sbRel > 1e-9 ? 1.0 / sbRel : 1.0;
                 double newClear = idle + active * ratio;
                 _simNew.Add(newClear); _simFloor.Add(idle); _simRatio[_simRatio.Count - 1] = ratio; _simCadence[_simCadence.Count - 1] = true;
             }
@@ -1234,9 +1232,9 @@ namespace TbhDpsMeter
             }
             // formula / which-parameter-helps notes (answers "公式在哪 / 哪些有影響") — compact, always under the rows
             int fl = (int)(lh * 0.72f);
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>通關 = 接近(怪走進攻擊範圍,英雄空等) ＋ 節奏(殺怪 = 每秒出手 × 每次打擊數)。你已一刀斬 → 加傷無效,只看殺得多快</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>殺怪速率 = Σ 打擊數 ÷ 間隔　|　間隔↓: 攻速·冷縮·施速　打擊數↑: 範圍(AoE)·多重·投射　接近↓: 射程(尚未量化)</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#6b7280>✅壓通關: <color=#7fffa0>攻速·冷縮·施速·範圍·多重·投射·射程</color>　❌無效: <color=#777e8a>攻擊·暴擊·暴傷·物傷%·移速</color>(一刀斬下對farm沒用,僅打王有用)</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>通關 = 接近(怪走進攻擊範圍,英雄空等) ＋ 節奏(殺怪)。一刀斬 → 加傷無效,只看殺得多快</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>殺怪是序列化的(一次一招,技能優先壓住自動): <color=#cfe0d6>自動職(遊俠)看攻速</color> · <color=#cfe0d6>技能職(法師)看冷縮+群攻</color>(冷縮到頂後攻速才回來) · 牧師放Buff不算殺</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#6b7280>✅已計入: <color=#7fffa0>攻速·冷縮·範圍</color>　⏳真有效但未計: <color=#d2c07a>施速·多重·投射·射程</color>　❌一刀斬無效: <color=#777e8a>攻擊·暴擊·暴傷·物傷%·移速</color>(僅打王有用)</color></size>", _label); cy += fl;
             return cy;
         }
 

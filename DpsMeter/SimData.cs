@@ -67,15 +67,16 @@ namespace TbhDpsMeter
         public static bool TryGet(string id, out StageInfo s) => _m.TryGetValue(id, out s);
     }
 
-    /// <summary>Precomputed per-stage context for the socket optimizer: the calibration (k, bCur) and the OTHER
-    /// party members' fixed streams, so each candidate only re-sims the focused hero's streams. Parallel arrays
-    /// indexed by farmed-stage. Plain class (not injected).</summary>
+    /// <summary>Precomputed per-stage context for the socket optimizer. Clear = Floor(approach/idle) + BM(kill/
+    /// active) × ratio, where ratio = 1 / Σ_hero share_h·(rate_h/curRate_h). Only the FOCUSED hero's rate changes
+    /// per candidate, so each stage caches its measured damage SHARE + CURRENT kill-rate; the others contribute a
+    /// fixed (1−FocShare). Share-weighting grounds the per-hero split in the run's real DamageDealt (so a buffing
+    /// support that barely kills can't dominate). Parallel arrays indexed by farmed-stage. Plain class.</summary>
     public class OptCtx
     {
         public int N;
-        public int[] Waves, Mpw;
-        public double[] EffHP, Boss, K, BCur, Floor, BM;
-        public List<AtkStream>[] Other;   // non-focused participants' current streams (fixed during optimization)
+        public double[] Floor, BM;          // per-stage approach(idle) floor + kill(active) seconds
+        public double[] FocShare, FocCur;   // focused hero's measured damage share + current-gear kill-rate, per stage
         public bool[] FocIn, Valid;
     }
 
@@ -128,6 +129,53 @@ namespace TbhDpsMeter
             double cr = critRate < 0 ? 0 : (critRate > 1 ? 1 : critRate);
             if (1 - cr > 0.001) streams.Add(new AtkStream(attack * coeff, interval / (1 - cr), targets));
             if (cr > 0.001) streams.Add(new AtkStream(attack * critDmg * coeff, interval / cr, targets));
+        }
+
+        /// <summary>Per-hero KILLS/SEC on one-shot content, modelled as the game's REAL serialized action queue
+        /// (decompiled Unit.gqh: one action per frame, a ready COOLDOWN skill takes priority and SUPPRESSES the
+        /// base auto, actions don't overlap so the rate is bounded by the action budget ≈ AttackSpeed).
+        ///   • COOLDOWN skills (act 2) fire at 1/max(0.1, baseCD·(1−CDR)), each killing its AoE targets.
+        ///   • BASEATTACK_COUNT (act 1) REPLACES every Av-th auto — adds (targets−1)/Av extra targets per auto.
+        ///   • the base auto (act 0, single-target) fills the budget LEFT after cooldown casts: AttackSpeed−Σcd.
+        ///   • SATURATION: if cooldown casts want to fire faster than the budget (Σcd ≥ AttackSpeed), the hero is
+        ///     action-bound — rate = avgCdTargets·AttackSpeed (so past the CDR knee, AttackSpeed matters again).
+        /// Damage-independent by construction (no attack/crit term), so damage edits give ZERO clear change; only
+        /// AttackSpeed (budget), CDR (cooldown rate) and AoE (targets) move it. CastSpeed/Multistrike TODO.</summary>
+        public static double HeroKillRate(int heroKey, double aspd, double cdr,
+            IList<int> skillKeys, IList<int> skillLevels, double aoeMult = 1.0)
+        {
+            if (aspd <= 0) return 0;
+            double mult = aoeMult > 0 ? aoeMult : 1.0;
+            double cooldownRate = 0, cooldownKills = 0, autoExtraTargets = 0;
+            int baseKey = (heroKey / 100) * 10000 + 1;
+            bool baseInList = false;
+            void Acc(int key, int lvl)
+            {
+                if (!SkillDb.TryGet(key, out var s)) return;
+                int targets = s.Aoe ? Math.Max(1, (int)Math.Round(AoeTargets * mult)) : 1;
+                if (s.Act == 2 && s.Av > 0)                       // COOLDOWN — own cadence, suppresses the auto
+                {
+                    double rate = 1.0 / Math.Max(0.1, s.Av * (1.0 - cdr));
+                    cooldownRate += rate; cooldownKills += targets * rate;
+                }
+                else if (s.Act == 1 && s.Av > 0 && targets > 1)   // count-skill upgrades every Av-th auto's targets
+                    autoExtraTargets += (targets - 1.0) / s.Av;
+                // act 0 (base auto) contributes through the auto budget below, not as its own stream
+            }
+            if (skillKeys != null)
+                for (int i = 0; i < skillKeys.Count; i++)
+                {
+                    if (skillKeys[i] == baseKey) baseInList = true;
+                    Acc(skillKeys[i], (skillLevels != null && i < skillLevels.Count) ? skillLevels[i] : 1);
+                }
+            if (!baseInList) Acc(baseKey, 1);
+            if (cooldownRate >= aspd)                             // action-bound: budget saturated by cooldown casts
+            {
+                double avgCd = cooldownRate > 1e-9 ? cooldownKills / cooldownRate : 0;
+                return avgCd * aspd;
+            }
+            double autoRate = aspd - cooldownRate;                // base auto fills the remaining budget, 1 target
+            return cooldownKills + (1.0 + autoExtraTargets) * autoRate;
         }
 
         /// <summary>Binary-search the effHP scale k so the iterative BATTLE time (no floor) reproduces the

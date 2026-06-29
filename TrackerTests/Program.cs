@@ -231,31 +231,41 @@ class Tests
 
         // --- GearScore ---
         var giLegendary = new GearItem { Grade = "LEGENDARY", Level = 80 };
-        giLegendary.Affixes.Add(new Affix("attack", 100));      // 100*1
-        giLegendary.Sockets.Add(new Affix("critrate", 0.03));   // 0.03*1000 = 30
+        giLegendary.Affixes.Add(new Affix("attack", 100));      // filled socket: +40 flat + 100*1 attack
+        giLegendary.Sockets.Add(new Affix("critrate", 0.03));   // live-path socket stat: 0.03*1000 = 30
         var isLeg = GearScore.ScoreItem(giLegendary);
-        // 250 (LEGENDARY) + 160 (80*2) + 100 (attack) + 30 (socket crit) = 540
-        Check("gearscore item = 540", Near(isLeg.Total, 540), isLeg.Total);
+        // 250 (LEGENDARY) + 160 (80*2) + 40 (1 filled socket) + 100 (attack) + 30 (socket crit) = 580
+        Check("gearscore item = 580", Near(isLeg.Total, 580), isLeg.Total);
         Check("gearscore unknown grade = 0 base", Near(GearScore.GradePoints(""), 0), GearScore.GradePoints(""));
         Check("gearscore unknown stat weight = 1", Near(GearScore.WeightOf("nonsense"), 1), GearScore.WeightOf("nonsense"));
 
         var gsSnap = new CharacterSnapshot();
         gsSnap.Equipment.Add(giLegendary);
         gsSnap.Equipment.Add(new GearItem { Grade = "RARE", Level = 0 });   // 120 + 0
-        Check("gearscore character total = 660", Near(GearScore.ScoreCharacter(gsSnap).Total, 660), GearScore.ScoreCharacter(gsSnap).Total);
-        // attack/defence split: attack=100 (offensive), hp is defensive
+        // giLegendary 580 + RARE/0 (120) = 700
+        Check("gearscore character total = 700", Near(GearScore.ScoreCharacter(gsSnap).Total, 700), GearScore.ScoreCharacter(gsSnap).Total);
+        // attack/defence split: the attack stat buckets offensive, hp defensive; the 2 filled-socket flats
+        // (no GearType → neutral) bucket to attack.
         var giMix = new GearItem();
-        giMix.Affixes.Add(new Affix("attack", 100));  // offensive
-        giMix.Affixes.Add(new Affix("hp", 500));      // defensive: 500*0.1 = 50
+        giMix.Affixes.Add(new Affix("attack", 100));  // offensive stat (also a filled socket: +40 base)
+        giMix.Affixes.Add(new Affix("hp", 500));      // defensive 500*0.1=50 (also a filled socket: +40 base)
         var isMix = GearScore.ScoreItem(giMix);
-        Check("gearscore attack bucket = 100", Near(isMix.Attack, 100), isMix.Attack);
+        // 2 filled sockets → 80 base → neutral GearType buckets it to attack → 100 + 80 = 180
+        Check("gearscore attack bucket = 180", Near(isMix.Attack, 180), isMix.Attack);
         Check("gearscore defense bucket = 50", Near(isMix.Defense, 50), isMix.Defense);
         Check("gearscore null item = 0", Near(GearScore.ScoreItem(null).Total, 0), GearScore.ScoreItem(null).Total);
 
-        // socket counts (裝飾/雕刻/銘文) score at 40 pts each
-        var giSock = new GearItem { Grade = "RARE", DecoCount = 2, EngraveCount = 1, InscribeCount = 0 };
-        // 120 (rare) + (2+1+0)*40 = 240
-        Check("gearscore sockets = 240", Near(GearScore.ScoreItem(giSock).Total, 240), GearScore.ScoreItem(giSock).Total);
+        // FILLED sockets = non-empty EnchantData enchants (g.Affixes), scored at 40 pts each (plus their
+        // own stat value). The save's *AppliedTotalCount fields are operation tallies, NOT slot counts.
+        var giSock = new GearItem { Grade = "RARE", DecoCount = 4, EngraveCount = 1, InscribeCount = 0 };
+        giSock.Affixes.Add(new Affix("attack", 10, "FLAT", 3));   // deco    → 40 socket + 10 attack
+        giSock.Affixes.Add(new Affix("attack", 20, "FLAT", 3));   // deco    → 40 socket + 20 attack
+        giSock.Affixes.Add(new Affix("attack", 30, "FLAT", 4));   // engrave → 40 socket + 30 attack
+        // 120 (rare) + 3 filled*40 + (10+20+30) attack = 120 + 120 + 60 = 300; the 4/1/0 tallies are ignored
+        Check("gearscore filled sockets = 300", Near(GearScore.ScoreItem(giSock).Total, 300), GearScore.ScoreItem(giSock).Total);
+        // bogus applied tallies (no real enchants) must NOT inflate the score — only the grade base remains
+        var giTally = new GearItem { Grade = "RARE", DecoCount = 4, EngraveCount = 1, InscribeCount = 0 };
+        Check("gearscore ignores applied tallies = 120", Near(GearScore.ScoreItem(giTally).Total, 120), GearScore.ScoreItem(giTally).Total);
 
         Console.WriteLine(_fail == 0 ? "\nALL TESTS PASSED" : $"\n{_fail} TEST(S) FAILED");
         return _fail == 0 ? 0 : 1;
@@ -722,6 +732,34 @@ class Tests
         Check("[sim] fallback dpsFrac=1: speed alone saves nothing", Near(fb2.SavedSec, 0), fb2.SavedSec);
         var fb0 = ClearTimeSim.SimulateFallback(0, 0.6, 2.0, 2.0);
         Check("[sim] fallback unknown clear (0) -> nothing", Near(fb0.NewClear, 0) && Near(fb0.SavedSec, 0), fb0.NewClear);
+
+        // ===== HeroKillRate: the SERIALIZED action-queue cadence (decompiled Unit.gqh) =====
+        // Real loop: ONE action per frame, a ready COOLDOWN skill SUPPRESSES the base auto, actions don't overlap
+        // (budget ≈ AttackSpeed). So an auto-only hero scales with AttackSpeed; a cooldown caster scales with CDR
+        // until the budget saturates, then with AttackSpeed again. Verified by the 10-subagent gqh trace.
+        Console.WriteLine("-- HeroKillRate (serialized cadence) --");
+        // 201 ranger: base auto (act0) + count skill av5 single-target.  301 mage: base auto + 2 cooldown AoE.
+        SkillDb.Load("{\"20001\":[0,1,0,[1]],\"20101\":[1,5,0,[1]],\"30001\":[0,1,0,[1]],\"30301\":[2,15,1,[1]],\"30601\":[2,18,1,[1]]}");
+        var rngSk = new System.Collections.Generic.List<int> { 20101 };
+        var mageSk = new System.Collections.Generic.List<int> { 30301, 30601 };
+        // (1) ranger = pure auto, single-target ⇒ rate == AttackSpeed, and CDR does NOTHING (no cooldown skills)
+        double rR0 = StreamBuilder.HeroKillRate(201, 1.0, 0.0, rngSk, null);
+        Check("[kr] ranger rate == AttackSpeed (1.0)", Near(rR0, 1.0), rR0);
+        Check("[kr] ranger +20% aspd ⇒ +20% rate", Near(StreamBuilder.HeroKillRate(201, 1.2, 0.0, rngSk, null), 1.2), StreamBuilder.HeroKillRate(201, 1.2, 0.0, rngSk, null));
+        Check("[kr] ranger CDR is INERT (no cooldown skills)", Near(StreamBuilder.HeroKillRate(201, 1.0, 0.8, rngSk, null), rR0), StreamBuilder.HeroKillRate(201, 1.0, 0.8, rngSk, null));
+        // (2) mage: at moderate CDR, +CDR beats +AttackSpeed (cooldown AoE skills are the kill engine)
+        double mBase = StreamBuilder.HeroKillRate(301, 1.11, 0.80, mageSk, null);
+        double mCdr  = StreamBuilder.HeroKillRate(301, 1.11, 0.90, mageSk, null);   // +10% CDR
+        double mAspd = StreamBuilder.HeroKillRate(301, 1.332, 0.80, mageSk, null);  // +20% aspd
+        Check("[kr] mage +CDR raises rate", mCdr > mBase, mCdr - mBase);
+        Check("[kr] mage +CDR beats +aspd (caster wants CDR)", (mCdr - mBase) > (mAspd - mBase), (mCdr - mBase) + " vs " + (mAspd - mBase));
+        // (3) AoE raises the mage (more targets/cast); ranger is single-target so AoE is INERT for it
+        Check("[kr] mage +50% AoE raises rate", StreamBuilder.HeroKillRate(301, 1.11, 0.80, mageSk, null, 1.5) > mBase, true);
+        Check("[kr] ranger AoE INERT (single-target skills)", Near(StreamBuilder.HeroKillRate(201, 1.0, 0.0, rngSk, null, 1.5), rR0), true);
+        // (4) saturation: past the CDR knee the hero is action-bound, so AttackSpeed matters AGAIN
+        double satCdr = StreamBuilder.HeroKillRate(301, 1.11, 0.95, mageSk, null);
+        double satCdrFastHands = StreamBuilder.HeroKillRate(301, 1.4, 0.95, mageSk, null);
+        Check("[kr] saturated caster: +aspd still helps (action-bound)", satCdrFastHands > satCdr, satCdrFastHands - satCdr);
 
         // --- AggregateTiming: median active/idle over a stage's runs that captured a split ---
         var runs = new System.Collections.Generic.List<RunRecord>
