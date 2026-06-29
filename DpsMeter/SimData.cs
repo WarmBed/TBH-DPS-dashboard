@@ -131,22 +131,28 @@ namespace TbhDpsMeter
             if (cr > 0.001) streams.Add(new AtkStream(attack * critDmg * coeff, interval / cr, targets));
         }
 
+        public const double CdrCap = 0.75;        // CooldownReduction hard cap (decompiled Hero.gre, 0x3F400000)
+        public const double BaseCastClip = 0.5;   // est. cooldown-skill cast/animation lock (s); CastSpeed divides it
+
         /// <summary>Per-hero KILLS/SEC on one-shot content, modelled as the game's REAL serialized action queue
         /// (decompiled Unit.gqh: one action per frame, a ready COOLDOWN skill takes priority and SUPPRESSES the
-        /// base auto, actions don't overlap so the rate is bounded by the action budget ≈ AttackSpeed).
-        ///   • COOLDOWN skills (act 2) fire at 1/max(0.1, baseCD·(1−CDR)), each killing its AoE targets.
+        /// base auto; the cast occupies an animation lock = clip/CastSpeed, NOT bounded by AttackSpeed).
+        ///   • COOLDOWN skills (act 2) recast every max(castTime, max(0.1, baseCD·(1−CDR_eff))) — CDR_eff is HARD
+        ///     CAPPED at 0.75 (Hero.gre), so a hero already past 0.75 gets ZERO from more CDR. Each kills its targets.
+        ///   • the cast occupies castTime each, so the base auto only fills the LEFTOVER timeline: AttackSpeed·(1−Σocc).
         ///   • BASEATTACK_COUNT (act 1) REPLACES every Av-th auto — adds (targets−1)/Av extra targets per auto.
-        ///   • the base auto (act 0, single-target) fills the budget LEFT after cooldown casts: AttackSpeed−Σcd.
-        ///   • SATURATION: if cooldown casts want to fire faster than the budget (Σcd ≥ AttackSpeed), the hero is
-        ///     action-bound — rate = avgCdTargets·AttackSpeed (so past the CDR knee, AttackSpeed matters again).
-        /// Damage-independent by construction (no attack/crit term), so damage edits give ZERO clear change; only
-        /// AttackSpeed (budget), CDR (cooldown rate) and AoE (targets) move it. CastSpeed/Multistrike TODO.</summary>
+        ///   • if casts over-subscribe the timeline (Σocc≥1) the hero is cast-bound — rate = cooldownKills/Σocc, and
+        ///     only CastSpeed (shorter castTime) or AoE (more targets) help further, NOT AttackSpeed/CDR.
+        /// Damage-independent (no attack/crit term) ⇒ damage edits give ZERO clear change. AttackSpeed & AoE are
+        /// uncapped (decompiled); CDR capped at 0.75; CastSpeed shortens the cast lock.</summary>
         public static double HeroKillRate(int heroKey, double aspd, double cdr,
-            IList<int> skillKeys, IList<int> skillLevels, double aoeMult = 1.0)
+            IList<int> skillKeys, IList<int> skillLevels, double aoeMult = 1.0, double castSpeed = 1.0)
         {
             if (aspd <= 0) return 0;
             double mult = aoeMult > 0 ? aoeMult : 1.0;
-            double cooldownRate = 0, cooldownKills = 0, autoExtraTargets = 0;
+            double cdrEff = cdr > CdrCap ? CdrCap : cdr;                       // combat clamps CDR to 0.75
+            double castTime = BaseCastClip / Math.Max(0.3, castSpeed);        // animation lock = clip / CastSpeed
+            double cooldownKills = 0, occupancy = 0, autoExtraTargets = 0;
             int baseKey = (heroKey / 100) * 10000 + 1;
             bool baseInList = false;
             void Acc(int key, int lvl)
@@ -155,8 +161,9 @@ namespace TbhDpsMeter
                 int targets = s.Aoe ? Math.Max(1, (int)Math.Round(AoeTargets * mult)) : 1;
                 if (s.Act == 2 && s.Av > 0)                       // COOLDOWN — own cadence, suppresses the auto
                 {
-                    double rate = 1.0 / Math.Max(0.1, s.Av * (1.0 - cdr));
-                    cooldownRate += rate; cooldownKills += targets * rate;
+                    double interval = Math.Max(castTime, Math.Max(0.1, s.Av * (1.0 - cdrEff)));
+                    double rate = 1.0 / interval;
+                    cooldownKills += targets * rate; occupancy += castTime * rate;
                 }
                 else if (s.Act == 1 && s.Av > 0 && targets > 1)   // count-skill upgrades every Av-th auto's targets
                     autoExtraTargets += (targets - 1.0) / s.Av;
@@ -169,12 +176,8 @@ namespace TbhDpsMeter
                     Acc(skillKeys[i], (skillLevels != null && i < skillLevels.Count) ? skillLevels[i] : 1);
                 }
             if (!baseInList) Acc(baseKey, 1);
-            if (cooldownRate >= aspd)                             // action-bound: budget saturated by cooldown casts
-            {
-                double avgCd = cooldownRate > 1e-9 ? cooldownKills / cooldownRate : 0;
-                return avgCd * aspd;
-            }
-            double autoRate = aspd - cooldownRate;                // base auto fills the remaining budget, 1 target
+            if (occupancy >= 1.0) return cooldownKills / occupancy;           // cast-bound: casts saturate the timeline
+            double autoRate = aspd * (1.0 - occupancy);                       // base auto fills the gaps between casts
             return cooldownKills + (1.0 + autoExtraTargets) * autoRate;
         }
 

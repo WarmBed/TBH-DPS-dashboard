@@ -733,33 +733,32 @@ class Tests
         var fb0 = ClearTimeSim.SimulateFallback(0, 0.6, 2.0, 2.0);
         Check("[sim] fallback unknown clear (0) -> nothing", Near(fb0.NewClear, 0) && Near(fb0.SavedSec, 0), fb0.NewClear);
 
-        // ===== HeroKillRate: the SERIALIZED action-queue cadence (decompiled Unit.gqh) =====
-        // Real loop: ONE action per frame, a ready COOLDOWN skill SUPPRESSES the base auto, actions don't overlap
-        // (budget ≈ AttackSpeed). So an auto-only hero scales with AttackSpeed; a cooldown caster scales with CDR
-        // until the budget saturates, then with AttackSpeed again. Verified by the 10-subagent gqh trace.
-        Console.WriteLine("-- HeroKillRate (serialized cadence) --");
+        // ===== HeroKillRate: the SERIALIZED action-queue cadence (decompiled Unit.gqh + Hero.gre CDR cap) =====
+        // Real loop: ONE action per frame, a ready COOLDOWN skill SUPPRESSES the base auto, the cast occupies an
+        // animation lock (clip/CastSpeed). CDR is HARD-CAPPED at 0.75 (decompiled). An auto-only hero scales with
+        // AttackSpeed; a cooldown caster scales with CDR only UP TO the 0.75 cap, then with AttackSpeed/AoE.
+        Console.WriteLine("-- HeroKillRate (serialized cadence + 0.75 CDR cap) --");
         // 201 ranger: base auto (act0) + count skill av5 single-target.  301 mage: base auto + 2 cooldown AoE.
         SkillDb.Load("{\"20001\":[0,1,0,[1]],\"20101\":[1,5,0,[1]],\"30001\":[0,1,0,[1]],\"30301\":[2,15,1,[1]],\"30601\":[2,18,1,[1]]}");
         var rngSk = new System.Collections.Generic.List<int> { 20101 };
         var mageSk = new System.Collections.Generic.List<int> { 30301, 30601 };
-        // (1) ranger = pure auto, single-target ⇒ rate == AttackSpeed, and CDR does NOTHING (no cooldown skills)
+        // (1) ranger = pure auto, single-target ⇒ rate == AttackSpeed, and CDR/AoE do NOTHING (no cooldown skills)
         double rR0 = StreamBuilder.HeroKillRate(201, 1.0, 0.0, rngSk, null);
         Check("[kr] ranger rate == AttackSpeed (1.0)", Near(rR0, 1.0), rR0);
         Check("[kr] ranger +20% aspd ⇒ +20% rate", Near(StreamBuilder.HeroKillRate(201, 1.2, 0.0, rngSk, null), 1.2), StreamBuilder.HeroKillRate(201, 1.2, 0.0, rngSk, null));
         Check("[kr] ranger CDR is INERT (no cooldown skills)", Near(StreamBuilder.HeroKillRate(201, 1.0, 0.8, rngSk, null), rR0), StreamBuilder.HeroKillRate(201, 1.0, 0.8, rngSk, null));
-        // (2) mage: at moderate CDR, +CDR beats +AttackSpeed (cooldown AoE skills are the kill engine)
-        double mBase = StreamBuilder.HeroKillRate(301, 1.11, 0.80, mageSk, null);
-        double mCdr  = StreamBuilder.HeroKillRate(301, 1.11, 0.90, mageSk, null);   // +10% CDR
-        double mAspd = StreamBuilder.HeroKillRate(301, 1.332, 0.80, mageSk, null);  // +20% aspd
-        Check("[kr] mage +CDR raises rate", mCdr > mBase, mCdr - mBase);
-        Check("[kr] mage +CDR beats +aspd (caster wants CDR)", (mCdr - mBase) > (mAspd - mBase), (mCdr - mBase) + " vs " + (mAspd - mBase));
-        // (3) AoE raises the mage (more targets/cast); ranger is single-target so AoE is INERT for it
-        Check("[kr] mage +50% AoE raises rate", StreamBuilder.HeroKillRate(301, 1.11, 0.80, mageSk, null, 1.5) > mBase, true);
         Check("[kr] ranger AoE INERT (single-target skills)", Near(StreamBuilder.HeroKillRate(201, 1.0, 0.0, rngSk, null, 1.5), rR0), true);
-        // (4) saturation: past the CDR knee the hero is action-bound, so AttackSpeed matters AGAIN
-        double satCdr = StreamBuilder.HeroKillRate(301, 1.11, 0.95, mageSk, null);
-        double satCdrFastHands = StreamBuilder.HeroKillRate(301, 1.4, 0.95, mageSk, null);
-        Check("[kr] saturated caster: +aspd still helps (action-bound)", satCdrFastHands > satCdr, satCdrFastHands - satCdr);
+        // (2) CDR HARD CAP 0.75: a mage already past 0.75 gets NOTHING from more CDR (the user's 0.838 mage)
+        double mCap = StreamBuilder.HeroKillRate(301, 1.11, 0.75, mageSk, null);
+        Check("[kr] CDR capped at 0.75: 0.80 == 0.75", Near(StreamBuilder.HeroKillRate(301, 1.11, 0.80, mageSk, null), mCap), 0);
+        Check("[kr] CDR capped at 0.75: 0.95 == 0.75", Near(StreamBuilder.HeroKillRate(301, 1.11, 0.95, mageSk, null), mCap), 0);
+        Check("[kr] over-cap mage: more CDR is INERT (0.90==0.75)", Near(StreamBuilder.HeroKillRate(301, 1.11, 0.90, mageSk, null), mCap), 0);
+        // (3) below the cap CDR DOES help (cooldowns speed up); over the cap AttackSpeed + AoE are the levers
+        Check("[kr] below-cap: +CDR speeds cooldowns (0.5 > 0.3)", StreamBuilder.HeroKillRate(301, 1.11, 0.50, mageSk, null) > StreamBuilder.HeroKillRate(301, 1.11, 0.30, mageSk, null), 0);
+        Check("[kr] over-cap mage: +aspd helps (auto-bound)", StreamBuilder.HeroKillRate(301, 1.332, 0.80, mageSk, null) > mCap, 0);
+        Check("[kr] over-cap mage: +AoE helps (nuke targets)", StreamBuilder.HeroKillRate(301, 1.11, 0.80, mageSk, null, 1.5) > mCap, 0);
+        // (4) CastSpeed shortens the cast lock — never lowers the rate (frees auto time / faster casts when bound)
+        Check("[kr] CastSpeed never hurts", StreamBuilder.HeroKillRate(301, 1.11, 0.80, mageSk, null, 1.0, 1.5) >= mCap - 1e-9, 0);
 
         // --- AggregateTiming: median active/idle over a stage's runs that captured a split ---
         var runs = new System.Collections.Generic.List<RunRecord>

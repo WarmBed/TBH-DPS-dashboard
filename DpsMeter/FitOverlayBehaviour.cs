@@ -913,13 +913,14 @@ namespace TbhDpsMeter
             Dictionary<int, double> cur, Dictionary<int, double> sb)
         {
             if (live == null) return;
-            double asp = Sv(live, "aspd"), cdr = Sv(live, "cdr");
+            double asp = Sv(live, "aspd"), cdr = Sv(live, "cdr"), casp = Sv(live, "CastSpd"); if (casp <= 0) casp = 1.0;
             skKeys.TryGetValue(hero, out var ks); skLvl.TryGetValue(hero, out var ls);
             double curAoe = Sv(live, "AoE");
             double aoeMult = curAoe > 1e-6 ? DispFP(curAoe, "AreaOfEffect", 1) / curAoe : 1.0;
-            cur[hero] = StreamBuilder.HeroKillRate(hero, asp, cdr, ks, ls, 1.0);
+            cur[hero] = StreamBuilder.HeroKillRate(hero, asp, cdr, ks, ls, 1.0, casp);
             sb[hero] = StreamBuilder.HeroKillRate(hero,
-                DispFP(asp, "AttackSpeed", 1), DispFP(cdr * 100, "CooldownReduction", 10) / 100.0, ks, ls, aoeMult);
+                DispFP(asp, "AttackSpeed", 1), DispFP(cdr * 100, "CooldownReduction", 10) / 100.0, ks, ls, aoeMult,
+                DispFP(casp, "CastSpeed", 1));
         }
 
         // build a hero's flat/percent loadout aggregates (_fpO from the REAL sockets, _fpN from _sockets[hero]'s
@@ -1006,7 +1007,8 @@ namespace TbhDpsMeter
                 _liveStats.TryGetValue(h, out var lv);
                 if (lv == null) { curBy[h] = 0; continue; }
                 _optSkKeys.TryGetValue(h, out var ks); _optSkLvl.TryGetValue(h, out var ls);
-                curBy[h] = StreamBuilder.HeroKillRate(h, Sv(lv, "aspd"), Sv(lv, "cdr"), ks, ls, 1.0);
+                double hcasp = Sv(lv, "CastSpd"); if (hcasp <= 0) hcasp = 1.0;
+                curBy[h] = StreamBuilder.HeroKillRate(h, Sv(lv, "aspd"), Sv(lv, "cdr"), ks, ls, 1.0, hcasp);
             }
             int n = _clearStages.Count;
             var bFloor = new double[n]; var bBM = new double[n]; var bTot = new double[n];
@@ -1233,8 +1235,8 @@ namespace TbhDpsMeter
             // formula / which-parameter-helps notes (answers "公式在哪 / 哪些有影響") — compact, always under the rows
             int fl = (int)(lh * 0.72f);
             GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>通關 = 接近(怪走進攻擊範圍,英雄空等) ＋ 節奏(殺怪)。一刀斬 → 加傷無效,只看殺得多快</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>殺怪是序列化的(一次一招,技能優先壓住自動): <color=#cfe0d6>自動職(遊俠)看攻速</color> · <color=#cfe0d6>技能職(法師)看冷縮+群攻</color>(冷縮到頂後攻速才回來) · 牧師放Buff不算殺</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#6b7280>✅已計入: <color=#7fffa0>攻速·冷縮·範圍</color>　⏳真有效但未計: <color=#d2c07a>施速·多重·投射·射程</color>　❌一刀斬無效: <color=#777e8a>攻擊·暴擊·暴傷·物傷%·移速</color>(僅打王有用)</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>殺怪是序列化的(一次一招,技能壓住自動): <color=#cfe0d6>自動職(遊俠)看攻速</color> · <color=#cfe0d6>技能職(法師)冷卻到頂(0.75上限)後 看攻速+範圍</color> · 牧師放Buff不算殺</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#6b7280>✅已計入: <color=#7fffa0>攻速·範圍·冷縮(≤0.75硬上限,超過無效)·施速</color>　⏳未計: <color=#d2c07a>多重·投射·射程</color>　❌一刀斬無效: <color=#777e8a>攻擊·暴擊·暴傷·物傷%·移速</color></color></size>", _label); cy += fl;
             return cy;
         }
 
