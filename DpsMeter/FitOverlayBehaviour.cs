@@ -967,8 +967,8 @@ namespace TbhDpsMeter
                 if (!c.Valid[i]) continue;
                 if (!c.FocIn[i]) { total += c.Floor[i] + c.BM[i]; continue; }   // focused absent → its sockets can't change this stage
                 var combined = new List<AtkStream>(c.Other[i]); combined.AddRange(sb);
-                double bsb = WaveSim.BattleTime(c.Waves[i], c.Mpw[i], c.EffHP[i] * c.K[i], combined, c.Boss[i] * c.K[i]);
-                total += c.Floor[i] + c.BM[i] * (c.BCur[i] > 0.01 ? bsb / c.BCur[i] : 1.0);
+                double sbRate = WaveSim.CadenceRate(combined);   // active(kill) scales by 1/rate; BCur = current party rate
+                total += c.Floor[i] + c.BM[i] * (sbRate > 1e-9 && c.BCur[i] > 1e-9 ? c.BCur[i] / sbRate : 1.0);
             }
             return total;
         }
@@ -1020,23 +1020,17 @@ namespace TbhDpsMeter
             for (int i = 0; i < n; i++)
             {
                 var r = _clearStages[i];
-                double measured = r.ActiveSeconds + r.IdleSeconds;
-                int wc = r.WaveDurations != null ? r.WaveDurations.Count : 0;
-                if (!StageDb.TryGet(r.StageId, out var st) || st.Waves <= 0) { bValid[i] = false; continue; }
-                int waves = wc > 0 ? Math.Min(wc, st.Waves) : st.Waves; bool full = waves >= st.Waves; double boss = full ? st.BossHp : 0;
+                double active = Math.Max(0, r.ActiveSeconds), idle = Math.Max(0, r.IdleSeconds);
                 var all = new List<AtkStream>(); var parts = new List<int>();
                 if (r.Party != null) foreach (var snap in r.Party)
                 {
                     if (snap == null || snap.DamageDealt <= 0 || !int.TryParse(snap.Character, out var hk) || !curBy.TryGetValue(hk, out var cs)) continue;
                     all.AddRange(cs); parts.Add(hk);
                 }
-                if (all.Count == 0) { bValid[i] = false; continue; }
-                double floor = Math.Min(measured, 0.8 * waves + 2.45 + (full ? 4.25 : 0.0));
-                double bm = Math.Max(0.5, measured - floor);
-                double k = StreamBuilder.CalibrateHpScale(waves, st.Mpw, st.EffHp, boss, all, bm);
-                bWaves[i] = waves; bMpw[i] = st.Mpw; bEffHP[i] = st.EffHp; bBoss[i] = boss; bK[i] = k;
-                bBCur[i] = WaveSim.BattleTime(waves, st.Mpw, st.EffHp * k, all, boss * k);
-                bFloor[i] = floor; bBM[i] = bm; bParts[i] = parts; bValid[i] = true;
+                if (all.Count == 0 || active <= 0.1) { bValid[i] = false; continue; }
+                // CADENCE model: floor = idle (approach), battle = active (kill), scaled by the party kill-RATE.
+                bFloor[i] = idle; bBM[i] = active; bBCur[i] = WaveSim.CadenceRate(all);
+                bParts[i] = parts; bValid[i] = true;
             }
             // optimise each hero that fights in at least one stage
             foreach (int h in _heroes)
@@ -1142,9 +1136,9 @@ namespace TbhDpsMeter
             _simStage.Clear(); _simBase.Clear(); _simNew.Clear(); _simFloor.Clear(); _simRatio.Clear(); _simCadence.Clear();
             foreach (var r in _clearStages)
             {
-                double measured = r.ActiveSeconds + r.IdleSeconds;
-                int wc = r.WaveDurations != null ? r.WaveDurations.Count : 0;
-                _simStage.Add(r.StageId); _simBase.Add(measured); _simRatio.Add(1.0); _simCadence.Add(false);
+                double active = System.Math.Max(0, r.ActiveSeconds), idle = System.Math.Max(0, r.IdleSeconds);
+                double measured = active + idle;
+                _simStage.Add(r.StageId); _simBase.Add(measured); _simRatio.Add(1.0); _simCadence.Add(true);
                 var curS = new List<AtkStream>(); var sbS = new List<AtkStream>();
                 if (r.Party != null) foreach (var snap in r.Party)
                 {
@@ -1152,39 +1146,22 @@ namespace TbhDpsMeter
                     if (cur.TryGetValue(hk, out var cs)) curS.AddRange(cs);
                     if (sb.TryGetValue(hk, out var ss)) sbS.AddRange(ss);
                 }
-                if (!StageDb.TryGet(r.StageId, out var st) || st.Waves <= 0 || curS.Count == 0 || sbS.Count == 0)
-                {   // no sim data → fall back to the floor model (measured unchanged baseline)
-                    _simNew.Add(measured); _simFloor.Add(ClearTimeSim.FixedFloor(wc > 0 ? wc : st.Waves));
+                if (curS.Count == 0 || sbS.Count == 0 || active <= 0.1)
+                {   // no stream data / no measured active-kill phase → can't model; leave unchanged
+                    _simNew.Add(measured); _simFloor.Add(idle);
                     continue;
                 }
-                // model the SAME number of waves the run actually did (a partial run shouldn't predict the whole
-                // stage); the end boss only counts on a full clear.
-                int waves = wc > 0 ? System.Math.Min(wc, st.Waves) : st.Waves;
-                bool fullClear = waves >= st.Waves;
-                double bossHp = fullClear ? st.BossHp : 0;
-                // FIXED floor = the DECOMPILED constants only: 0.8s spawn-gate per wave (no inter-wave gap) +
-                // per-stage one-time (≈2.0s intro slow-mo + 0.45s entry + 4.25s stage-end on a full clear). The
-                // rest — including the KILL CADENCE (landing N blows at your attack rate, the bulk of a wave) — is
-                // the BATTLE, which WaveSim models hit-by-hit: damage past one-shot stops helping, but attack speed
-                // / AoE still compress the cadence. (Move speed is 0: the party-speed value is dead code in-game.)
-                double floorTotal = System.Math.Min(measured, 0.8 * waves + 2.45 + (fullClear ? 4.25 : 0.0));
-                double battleMeasured = System.Math.Max(0.5, measured - floorTotal);
-                double k = StreamBuilder.CalibrateHpScale(waves, st.Mpw, st.EffHp, bossHp, curS, battleMeasured);
-                // show the battle RELATIVELY: newBattle = battleMeasured × (sandbox battle ÷ current battle).
-                // No edit ⇒ ratio 1 ⇒ newClear == measured (exact identity, robust to calibration clamping).
-                double bCur = WaveSim.BattleTime(waves, st.Mpw, st.EffHp * k, curS, bossHp * k);
-                double bSb = WaveSim.BattleTime(waves, st.Mpw, st.EffHp * k, sbS, bossHp * k);
-                bool ok = bCur > 0.01 && !double.IsInfinity(bCur) && !double.IsNaN(bSb) && !double.IsInfinity(bSb);
-                double ratio = ok ? bSb / bCur : 1.0;
-                double newClear = floorTotal + battleMeasured * ratio;
-                // cadence/overkill-bound: does MORE damage help here? Compare current battle to the cadence floor
-                // (one-shot everything). If within 5%, the party already one-shots ⇒ pure-damage edits do nothing;
-                // only attack-speed / CDR / AoE compress the cadence. Surface this so a +0% damage delta makes sense.
-                var curInf = new List<AtkStream>(curS.Count);
-                foreach (var s2 in curS) curInf.Add(new AtkStream(s2.PerHit * 1e9, s2.Interval, s2.Targets));
-                double bFloor = WaveSim.BattleTime(waves, st.Mpw, st.EffHp * k, curInf, bossHp * k);
-                bool cadence = ok && bFloor > 0 && bCur <= bFloor * 1.05;
-                _simNew.Add(newClear); _simFloor.Add(floorTotal); _simRatio[_simRatio.Count - 1] = ratio; _simCadence[_simCadence.Count - 1] = cadence;
+                // CADENCE model (verified by the 100%-coverage stat audit + live measurement): on one-shot farm
+                // content the clear splits into ACTIVE (≈ the run's active seconds = the kill phase, bound by the
+                // party KILL-RATE = casts/sec × targets) + IDLE (≈ monsters spawning + walking into attack range
+                // while the hero idles = the approach floor). Per-hit DAMAGE changes NOTHING (every cast already
+                // one-shots); only AttackSpeed/CDR (Interval) and AoE/Multistrike/ProjectileCount (Targets) raise
+                // the kill-rate. Move speed is dead; attack RANGE would cut idle but isn't quantified yet, so idle
+                // is held fixed here. newActive = active × (currentRate ÷ sandboxRate).
+                double curRate = WaveSim.CadenceRate(curS), sbRate = WaveSim.CadenceRate(sbS);
+                double ratio = (curRate > 1e-9 && sbRate > 1e-9) ? curRate / sbRate : 1.0;
+                double newClear = idle + active * ratio;
+                _simNew.Add(newClear); _simFloor.Add(idle); _simRatio[_simRatio.Count - 1] = ratio; _simCadence[_simCadence.Count - 1] = true;
             }
         }
 
@@ -1211,8 +1188,9 @@ namespace TbhDpsMeter
             GUI.Label(_clearHeadRect, $"<color=#9fb4cc>{arrow} {Loc.G("fit_cleartitle")}</color>  <size=10>{ph}</size>", _label);
             cy += lh;
             if (!show) return cy;   // collapsed: just the title (click it to re-open)
-            // legend: 地板 = fixed spawn/end floor (DPS can't cut it); 戰 = the DPS-bound kill+cadence time
-            GUI.Label(new Rect(ix + 258, cy, iw - 258, lh), $"<size=10><color=#7d8aa0>■地板=固定</color>  <color=#9fb4cc>■戰=DPS壓縮</color></size>", _dim);
+            // legend: 接近 = monsters walking into range (idle, gear-fixed here); 節奏 = the kill phase that
+            // attack-speed/AoE compress (damage does NOT — one-shot)
+            GUI.Label(new Rect(ix + 258, cy, iw - 258, lh), $"<size=10><color=#7d8aa0>■接近=等怪走來(固定)</color>  <color=#9fb4cc>■節奏=攻速/AoE壓</color></size>", _dim);
             cy += (int)(lh * 0.7f);
             if (_clearStages.Count == 0) { GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#67707d>{Loc.G("fit_norun")}</color></size>", _label); return cy + lh; }
 
@@ -1237,8 +1215,7 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(ix, cy, 92, lh), $"<size=11><color=#6b7480>{(exp ? "▾" : "▸")}</color> <color={sl}>{StageLabel(_simStage[i])}</color></size>", _label);
                 GUI.Label(new Rect(ix + 94, cy, 104, lh), $"<size=11><color=#8a93a0>{baseC:0}s</color> → <color={nc}>{newC:0}s</color></size>", _label);
                 GUI.Label(new Rect(ix + 200, cy, 54, lh), $"<size=11><color={nc}>{(saved >= 0 ? "−" : "+")}{System.Math.Abs(saved):0.0}s</color></size>", _label);
-                if (cad) GUI.Label(new Rect(ix + 258, cy, 156, lh), $"<size=11><color=#7d8aa0>地板{floor:0}</color> <color=#d2a24a>節奏限制</color></size>", _label);
-                else GUI.Label(new Rect(ix + 258, cy, 156, lh), $"<size=11><color=#7d8aa0>地板{floor:0}</color> + <color={nc}>戰{battle:0}</color></size>", _label);
+                GUI.Label(new Rect(ix + 258, cy, 156, lh), $"<size=11><color=#7d8aa0>接近{floor:0}</color> + <color={nc}>節奏{battle:0}</color></size>", _label);
                 float by = cy + lh * 0.5f - 3;
                 DrawRect(barX, by, (float)(barW * baseC / maxBase), 6, new Color(1, 1, 1, 0.10f));
                 float floorW = (float)(barW * floor / maxBase), newW = (float)(barW * newC / maxBase);
@@ -1252,14 +1229,14 @@ namespace TbhDpsMeter
             {
                 double pct = totSaved / totBase * 100;
                 string sc = totSaved > 0.05 ? "#7fffa0" : (totSaved < -0.05 ? "#ff8a8a" : "#cdd5df");
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "−" : "+")}{System.Math.Abs(pct):0.#}%</color>  <size=9><color=#6b7280>迭代模擬 · 點關卡看每波</color></size></size>", _label);
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "−" : "+")}{System.Math.Abs(pct):0.#}%</color>  <size=9><color=#6b7280>節奏模型 · 點關卡看每波</color></size></size>", _label);
                 cy += lh;
             }
             // formula / which-parameter-helps notes (answers "公式在哪 / 哪些有影響") — compact, always under the rows
             int fl = (int)(lh * 0.72f);
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>每擊 = 攻擊 × 技能係數 × (1+物傷%) × 暴擊　|　間隔 = 自動 1/攻速 · 技能 max(0.1, CD×(1−冷縮))　|　AoE打擊數 = 2 × 範圍倍率</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>通關 = 地板(0.8/波 + 進場2.45 + 收尾4.25) ＋ 戰鬥(逐擊迭代,溢出浪費)。一刀斬後加傷無效 → 只剩攻速/冷縮/AoE</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#6b7280>影響: <color=#cdd5df>攻擊·暴擊·物傷%</color>(會溢出) · <color=#cdd5df>攻速·冷縮·範圍</color>(壓節奏,常有效)　無效: <color=#777e8a>移速·施法速度</color>(遊戲未使用)</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>通關 = 接近(怪走進攻擊範圍,英雄空等) ＋ 節奏(殺怪 = 每秒出手 × 每次打擊數)。你已一刀斬 → 加傷無效,只看殺得多快</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>殺怪速率 = Σ 打擊數 ÷ 間隔　|　間隔↓: 攻速·冷縮·施速　打擊數↑: 範圍(AoE)·多重·投射　接近↓: 射程(尚未量化)</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#6b7280>✅壓通關: <color=#7fffa0>攻速·冷縮·施速·範圍·多重·投射·射程</color>　❌無效: <color=#777e8a>攻擊·暴擊·暴傷·物傷%·移速</color>(一刀斬下對farm沒用,僅打王有用)</color></size>", _label); cy += fl;
             return cy;
         }
 
@@ -1276,13 +1253,17 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(ix + 14, cy, iw - 14, lh), "<size=9><color=#67707d>此關沒有每波紀錄</color></size>", _dim);
                 return cy + (int)(lh * 0.8f);
             }
-            GUI.Label(new Rect(ix + 14, cy, iw - 14, lh), $"<size=9><color=#7d8aa0>每波 實測→預估（每波地板 0.8s 固定，僅壓縮戰鬥段 ×{ratio:0.00}）</color></size>", _dim);
+            // split each wave into its idle(approach) + active(kill) by the run's overall idle/active fraction;
+            // only the active(kill) part scales by the cadence ratio (approach is gear-fixed here).
+            double rActive = System.Math.Max(0, run.ActiveSeconds), rIdle = System.Math.Max(0, run.IdleSeconds);
+            double activeFrac = (rActive + rIdle) > 0.1 ? rActive / (rActive + rIdle) : 0.5;
+            GUI.Label(new Rect(ix + 14, cy, iw - 14, lh), $"<size=9><color=#7d8aa0>每波 實測→預估（接近段固定，僅壓殺怪段 ×{ratio:0.00}；殺怪佔 {activeFrac * 100:0}%）</color></size>", _dim);
             cy += (int)(lh * 0.78f);
             int cols = PerWaveCols(iw);
             float cw = (iw - 14) / cols;
             for (int w = 0; w < wd.Count; w++)
             {
-                double dur = wd[w], bw = System.Math.Max(0, dur - 0.8), nw = 0.8 + bw * ratio;
+                double dur = wd[w], kill = dur * activeFrac, nw = dur - kill + kill * ratio;
                 string c2 = nw < dur - 0.03 ? "#7fffa0" : (nw > dur + 0.03 ? "#ff8a8a" : "#9aa3b0");
                 float wx = ix + 14 + (w % cols) * cw;
                 GUI.Label(new Rect(wx, cy, cw, lh), $"<size=9><color=#5f6873>W{w + 1}</color> <color=#8a93a0>{dur:0.0}</color><color={c2}>→{nw:0.0}</color></size>", _label);

@@ -81,6 +81,19 @@ namespace TbhDpsMeter
             return t;
         }
 
+        /// <summary>Party KILL-RATE (kills/sec) = Σ over attack streams of Targets/Interval. On one-shot farm
+        /// content every cast kills its targets, so clear time ∝ 1/rate — this is the cadence the active/kill
+        /// phase compresses to. It is independent of PER-HIT DAMAGE (raising attack/crit doesn't change Targets
+        /// or Interval), so damage edits correctly produce ZERO clear-time change; only AttackSpeed/CDR/CastSpeed
+        /// (Interval) and AoE/Multistrike/ProjectileCount (Targets) move it. Verified by the 100%-coverage audit.</summary>
+        public static double CadenceRate(IList<AtkStream> atks)
+        {
+            if (atks == null) return 0;
+            double r = 0;
+            foreach (var a in atks) if (a.Interval > 1e-9 && a.Targets > 0) r += a.Targets / a.Interval;
+            return r;
+        }
+
         /// <summary>Pure BATTLE time only (no spawn/approach/end floor): Σ over waves of the iterative kill time,
         /// plus the boss. The bench adds an EMPIRICAL per-wave floor (from the run's measured per-wave durations)
         /// on top — that floor is the part DPS can't compress, so it must not be inside the calibrated battle.</summary>
