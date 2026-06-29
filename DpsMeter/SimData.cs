@@ -158,7 +158,9 @@ namespace TbhDpsMeter
             void Acc(int key, int lvl)
             {
                 if (!SkillDb.TryGet(key, out var s)) return;
-                int targets = s.Aoe ? Math.Max(1, (int)Math.Round(AoeTargets * mult)) : 1;
+                // EXPECTED monsters hit per cast — fractional (a wider AoE radius catches more on average, smoothly;
+                // integer-rounding made small 範圍 gains vanish at the 2.4→2 step). Single-target skills hit 1.
+                double targets = s.Aoe ? Math.Max(1.0, AoeTargets * mult) : 1.0;
                 if (s.Act == 2 && s.Av > 0)                       // COOLDOWN — own cadence, suppresses the auto
                 {
                     double interval = Math.Max(castTime, Math.Max(0.1, s.Av * (1.0 - cdrEff)));
