@@ -565,7 +565,7 @@ namespace TbhDpsMeter
                     if (sr > maxSlotRows) maxSlotRows = sr;
                 }
                 bool showClearBlock = Plugin.FitShowClear == null || Plugin.FitShowClear.Value;
-                int clearRows = !showClearBlock ? 1 : (_clearStages.Count > 0 ? _clearStages.Count + 6 : 2);   // collapsed = just the title; +3 rows = formula notes
+                int clearRows = !showClearBlock ? 1 : (_clearStages.Count > 0 ? _clearStages.Count + 7 : 2);   // collapsed = just the title; reserves title+avg + the 3 size-11 note lines (≈2.76 rows at fl 0.92) + margin
                 if (showClearBlock && _simExpand >= 0 && _simExpand < _clearStages.Count)   // reserve rows for the per-wave grid
                 {
                     int nw = _clearStages[_simExpand].WaveDurations != null ? _clearStages[_simExpand].WaveDurations.Count : 0;
