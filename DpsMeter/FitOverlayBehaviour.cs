@@ -1229,14 +1229,14 @@ namespace TbhDpsMeter
             {
                 double pct = totSaved / totBase * 100;
                 string sc = totSaved > 0.05 ? "#7fffa0" : (totSaved < -0.05 ? "#ff8a8a" : "#cdd5df");
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "−" : "+")}{System.Math.Abs(pct):0.#}%</color>  <size=9><color=#6b7280>節奏模型 · 點關卡看每波</color></size></size>", _label);
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<size=13><color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "−" : "+")}{System.Math.Abs(pct):0.#}%</color>  <size=11><color=#6b7280>節奏模型 · 點關卡看每波</color></size></size>", _label);
                 cy += lh;
             }
             // formula / which-parameter-helps notes (answers "公式在哪 / 哪些有影響") — under the rows, readable
-            int fl = (int)(lh * 0.92f);
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=11><color=#8a97ac>通關 = 接近(等怪走進範圍,空等) ＋ 節奏(殺怪)。你已一刀斬 → 加傷無效,只看殺多快</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=11><color=#9fb4cc>✅有效:</color> <color=#7fffa0>攻速 · 範圍 · 冷縮(≤0.75封頂) · 施速</color>　<color=#9fb4cc>❌無效:</color> <color=#9aa3b0>攻擊 · 暴擊 · 暴傷 · 物傷% · 移速</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=11><color=#8a97ac>職業: <color=#cfe0d6>遊俠</color>靠攻速 · <color=#cfe0d6>法師</color>靠範圍+攻速(冷縮已封頂) · <color=#cfe0d6>牧師</color>放Buff不算殺</color></size>", _label); cy += fl;
+            int fl = (int)(lh * 1.05f);
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=13><color=#8a97ac>通關 = 接近(等怪走進範圍,空等) ＋ 節奏(殺怪)。你已一刀斬 → 加傷無效,只看殺多快</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=13><color=#9fb4cc>✅有效:</color> <color=#7fffa0>攻速 · 範圍 · 冷縮(≤0.75封頂) · 施速</color>　<color=#9fb4cc>❌無效:</color> <color=#9aa3b0>攻擊 · 暴擊 · 暴傷 · 物傷% · 移速</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=13><color=#8a97ac>職業: <color=#cfe0d6>遊俠</color>靠攻速 · <color=#cfe0d6>法師</color>靠範圍+攻速(冷縮已封頂) · <color=#cfe0d6>牧師</color>放Buff不算殺</color></size>", _label); cy += fl;
             return cy;
         }
 
