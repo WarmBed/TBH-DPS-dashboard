@@ -1185,7 +1185,7 @@ namespace TbhDpsMeter
             bool show = Plugin.FitShowClear == null || Plugin.FitShowClear.Value;
             _clearHeadRect = new Rect(ix, cy, iw, lh);
             string arrow = show ? "▼" : "▶";
-            GUI.Label(_clearHeadRect, $"<color=#9fb4cc>{arrow} {Loc.G("fit_cleartitle")}</color>  <size=10>{ph}</size>", _label);
+            GUI.Label(_clearHeadRect, $"<color=#9fb4cc>{arrow} {Loc.G("fit_cleartitle")}</color> <size=10><color=#e0a843>βeta</color></size>  <size=10>{ph}</size>", _label);
             cy += lh;
             if (!show) return cy;   // collapsed: just the title (click it to re-open)
             // legend: 接近 = monsters walking into range (idle, gear-fixed here); 節奏 = the kill phase that
@@ -1232,11 +1232,11 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "−" : "+")}{System.Math.Abs(pct):0.#}%</color>  <size=9><color=#6b7280>節奏模型 · 點關卡看每波</color></size></size>", _label);
                 cy += lh;
             }
-            // formula / which-parameter-helps notes (answers "公式在哪 / 哪些有影響") — compact, always under the rows
-            int fl = (int)(lh * 0.72f);
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>通關 = 接近(怪走進攻擊範圍,英雄空等) ＋ 節奏(殺怪)。一刀斬 → 加傷無效,只看殺得多快</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#7d8aa0>殺怪是序列化的(一次一招,技能壓住自動): <color=#cfe0d6>自動職(遊俠)看攻速</color> · <color=#cfe0d6>技能職(法師)冷卻到頂(0.75上限)後 看攻速+範圍</color> · 牧師放Buff不算殺</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=9><color=#6b7280>✅已計入: <color=#7fffa0>攻速·範圍·冷縮(≤0.75硬上限,超過無效)·施速</color>　⏳未計: <color=#d2c07a>多重·投射·射程</color>　❌一刀斬無效: <color=#777e8a>攻擊·暴擊·暴傷·物傷%·移速</color></color></size>", _label); cy += fl;
+            // formula / which-parameter-helps notes (answers "公式在哪 / 哪些有影響") — under the rows, readable
+            int fl = (int)(lh * 0.92f);
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=11><color=#8a97ac>通關 = 接近(等怪走進範圍,空等) ＋ 節奏(殺怪)。你已一刀斬 → 加傷無效,只看殺多快</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=11><color=#9fb4cc>✅有效:</color> <color=#7fffa0>攻速 · 範圍 · 冷縮(≤0.75封頂) · 施速</color>　<color=#9fb4cc>❌無效:</color> <color=#9aa3b0>攻擊 · 暴擊 · 暴傷 · 物傷% · 移速</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), "<size=11><color=#8a97ac>職業: <color=#cfe0d6>遊俠</color>靠攻速 · <color=#cfe0d6>法師</color>靠範圍+攻速(冷縮已封頂) · <color=#cfe0d6>牧師</color>放Buff不算殺</color></size>", _label); cy += fl;
             return cy;
         }
 
