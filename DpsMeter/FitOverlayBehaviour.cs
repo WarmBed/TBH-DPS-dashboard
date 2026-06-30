@@ -1190,7 +1190,7 @@ namespace TbhDpsMeter
             if (!show) return cy;   // collapsed: just the title (click it to re-open)
             // legend: 接近 = monsters walking into range (idle, gear-fixed here); 節奏 = the kill phase that
             // attack-speed/AoE compress (damage does NOT — one-shot)
-            GUI.Label(new Rect(ix + 258, cy, iw - 258, lh), $"<size=10><color=#7d8aa0>■接近=等怪走來(固定)</color>  <color=#9fb4cc>■節奏=攻速/AoE壓</color></size>", _dim);
+            GUI.Label(new Rect(ix + 258, cy, iw - 258, lh), $"<size=10>{Loc.G("fit_clearlegend")}</size>", _dim);
             cy += (int)(lh * 0.7f);
             if (_clearStages.Count == 0) { GUI.Label(new Rect(ix, cy, iw, lh), $"<size=11><color=#67707d>{Loc.G("fit_norun")}</color></size>", _label); return cy + lh; }
 
@@ -1215,7 +1215,7 @@ namespace TbhDpsMeter
                 GUI.Label(new Rect(ix, cy, 92, lh), $"<size=11><color=#6b7480>{(exp ? "▾" : "▸")}</color> <color={sl}>{StageLabel(_simStage[i])}</color></size>", _label);
                 GUI.Label(new Rect(ix + 94, cy, 104, lh), $"<size=11><color=#8a93a0>{baseC:0}s</color> → <color={nc}>{newC:0}s</color></size>", _label);
                 GUI.Label(new Rect(ix + 200, cy, 54, lh), $"<size=11><color={nc}>{(saved >= 0 ? "−" : "+")}{System.Math.Abs(saved):0.0}s</color></size>", _label);
-                GUI.Label(new Rect(ix + 258, cy, 156, lh), $"<size=11><color=#7d8aa0>接近{floor:0}</color> + <color={nc}>節奏{battle:0}</color></size>", _label);
+                GUI.Label(new Rect(ix + 258, cy, 156, lh), $"<size=11><color=#7d8aa0>{Loc.G("fit_approach")}{floor:0}</color> + <color={nc}>{Loc.G("fit_cadence")}{battle:0}</color></size>", _label);
                 float by = cy + lh * 0.5f - 3;
                 DrawRect(barX, by, (float)(barW * baseC / maxBase), 6, new Color(1, 1, 1, 0.10f));
                 float floorW = (float)(barW * floor / maxBase), newW = (float)(barW * newC / maxBase);
@@ -1229,14 +1229,14 @@ namespace TbhDpsMeter
             {
                 double pct = totSaved / totBase * 100;
                 string sc = totSaved > 0.05 ? "#7fffa0" : (totSaved < -0.05 ? "#ff8a8a" : "#cdd5df");
-                GUI.Label(new Rect(ix, cy, iw, lh), $"<size=13><color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "−" : "+")}{System.Math.Abs(pct):0.#}%</color>  <size=11><color=#6b7280>節奏模型 · 點關卡看每波</color></size></size>", _label);
+                GUI.Label(new Rect(ix, cy, iw, lh), $"<size=13><color=#9fb4cc>{Loc.G("fit_clearavg")}</color> <color={sc}>{(pct >= 0 ? "−" : "+")}{System.Math.Abs(pct):0.#}%</color>  <size=11><color=#6b7280>{Loc.G("fit_clearavghint")}</color></size></size>", _label);
                 cy += lh;
             }
             // formula / which-parameter-helps notes (answers "公式在哪 / 哪些有影響") — under the rows, readable
             int fl = (int)(lh * 1.05f);
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=13><color=#8a97ac>通關 = 接近(等怪走進範圍,空等) ＋ 節奏(殺怪)。你已一刀斬 → 加傷無效,只看殺多快</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=13><color=#9fb4cc>✅有效:</color> <color=#7fffa0>攻速 · 範圍 · 冷縮(≤0.75封頂) · 施速</color>　<color=#9fb4cc>❌無效:</color> <color=#9aa3b0>攻擊 · 暴擊 · 暴傷 · 物傷% · 移速</color></size>", _label); cy += fl;
-            GUI.Label(new Rect(ix, cy, iw, lh), "<size=13><color=#8a97ac>職業: <color=#cfe0d6>遊俠</color>靠攻速 · <color=#cfe0d6>法師</color>靠範圍+攻速(冷縮已封頂) · <color=#cfe0d6>牧師</color>放Buff不算殺</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), $"<size=13><color=#8a97ac>{Loc.G("fit_note1")}</color></size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), $"<size=13>{Loc.G("fit_note2")}</size>", _label); cy += fl;
+            GUI.Label(new Rect(ix, cy, iw, lh), $"<size=13>{Loc.G("fit_note3")}</size>", _label); cy += fl;
             return cy;
         }
 
@@ -1250,14 +1250,14 @@ namespace TbhDpsMeter
             double ratio = i < _simRatio.Count ? _simRatio[i] : 1.0;
             if (wd == null || wd.Count == 0)
             {
-                GUI.Label(new Rect(ix + 14, cy, iw - 14, lh), "<size=9><color=#67707d>此關沒有每波紀錄</color></size>", _dim);
+                GUI.Label(new Rect(ix + 14, cy, iw - 14, lh), $"<size=9><color=#67707d>{Loc.G("fit_nowavedata")}</color></size>", _dim);
                 return cy + (int)(lh * 0.8f);
             }
             // split each wave into its idle(approach) + active(kill) by the run's overall idle/active fraction;
             // only the active(kill) part scales by the cadence ratio (approach is gear-fixed here).
             double rActive = System.Math.Max(0, run.ActiveSeconds), rIdle = System.Math.Max(0, run.IdleSeconds);
             double activeFrac = (rActive + rIdle) > 0.1 ? rActive / (rActive + rIdle) : 0.5;
-            GUI.Label(new Rect(ix + 14, cy, iw - 14, lh), $"<size=9><color=#7d8aa0>每波 實測→預估（接近段固定，僅壓殺怪段 ×{ratio:0.00}；殺怪佔 {activeFrac * 100:0}%）</color></size>", _dim);
+            GUI.Label(new Rect(ix + 14, cy, iw - 14, lh), $"<size=9><color=#7d8aa0>{string.Format(Loc.G("fit_perwavenote"), ratio, activeFrac * 100)}</color></size>", _dim);
             cy += (int)(lh * 0.78f);
             int cols = PerWaveCols(iw);
             float cw = (iw - 14) / cols;
