@@ -573,6 +573,22 @@ class Tests
         Check("[farm] clear time = fastest, not median", Near(r24m.ClearSec, 245, 1), r24m.ClearSec);
         Check("[farm] merged run rate still ~1302", Near(r24m.GoldPerSec, 319000.0/245, 1), r24m.GoldPerSec);
 
+        // -- gold not yet flushed to the save (delta 0) must NOT discard the round --
+        // Gold is read from the periodically-flushed save, so most rounds read delta=0; exp is read live
+        // and is per-round accurate. A gold=0 run must still measure exp/sec + clear time (else F6 only
+        // updates when the save flushes, i.e. on stage switch). A mislabeled run (wrong NONZERO gold) is
+        // still rejected by the gold-ratio outlier filter.
+        var gz = new System.Collections.Generic.List<RunRecord>
+        {
+            Run("2-5 HELL", 243246, 4661825, 226, 3, 65),   // one gold-valid run so calibration exists
+            Run("2-4 HELL", 0, 6160000, 245, 3, 65),         // gold not flushed (0) but exp is real
+        };
+        var rowsGZ = FarmPlanner.Rank(stages, gz, out _, 65);
+        var r24gz = rowsGZ.Find(x => x.Stage.StageId == "2-4 HELL");
+        Check("[farm] gold=0 round still measured", r24gz.Measured, r24gz.Measured);
+        Check("[farm] gold=0 round exp/s per-round", Near(r24gz.ExpPerSec, 6160000.0/245, 1), r24gz.ExpPerSec);
+        Check("[farm] gold=0 round clear time real", Near(r24gz.ClearSec, 245, 1), r24gz.ClearSec);
+
         BuildFingerprintTests(stages);
     }
 
