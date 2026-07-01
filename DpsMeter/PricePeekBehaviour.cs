@@ -174,9 +174,9 @@ namespace TbhDpsMeter
                     GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9aa3b0>{Plugin.PriceAdjustKey} {Loc.G("price_drag_done")}</color>", _tiny);
                 }
                 else if (PriceStore.State == PriceStore.St.Loading)
-                    GUI.Label(new Rect(ix, cy, iw, lh), "<color=#9fb4cc>Steam 報價載入中…</color>", _dim);
+                    GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9fb4cc>{Loc.G("price_loading")}</color>", _dim);
                 else if (PriceStore.State == PriceStore.St.Error)
-                    GUI.Label(new Rect(ix, cy, iw, lh), "<color=#ef6a5a>報價讀取失敗</color>", _dim);
+                    GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#ef6a5a>{Loc.G("price_failed")}</color>", _dim);
                 else if (haveQuote)
                 {
                     string trend = "";
@@ -189,16 +189,16 @@ namespace TbhDpsMeter
                     }
                     GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#5fd07c>Steam {PriceStore.Format(info.Cents)}</color>{trend}", _label); cy += lh;
                     var sb = new System.Text.StringBuilder();
-                    if (info.MedianCents >= 0) sb.Append($"中位 {PriceStore.Format(info.MedianCents)}   ");
-                    sb.Append($"在售 {info.Qty}");
-                    if (info.Vol >= 0) sb.Append($"   24h成交 {info.Vol}");
+                    if (info.MedianCents >= 0) sb.Append($"{Loc.G("price_median")} {PriceStore.Format(info.MedianCents)}   ");
+                    sb.Append($"{Loc.G("price_listed")} {info.Qty}");
+                    if (info.Vol >= 0) sb.Append($"   {Loc.G("price_vol24")} {info.Vol}");
                     GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#9aa3b0>{sb}</color>", _tiny); cy += lh;
                     if (hasChart) { DrawSparkline(new Rect(ix, cy + 2f, iw, ChartH), hist, info.HistT, info.Cents, pinned); cy += ChartH + 4f; }
                     if (hasOB) DrawOrderBook(ix, cy, iw, ob, obRowH);
                 }
                 else
                 {
-                    GUI.Label(new Rect(ix, cy, iw, lh), "<color=#8a93a0>查無 Steam 報價</color>", _dim); cy += lh;
+                    GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#8a93a0>{Loc.G("price_none")}</color>", _dim); cy += lh;
                     if (!string.IsNullOrEmpty(steamName)) GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#5a626e>{steamName}</color>", _tiny);
                 }
             }
@@ -257,7 +257,7 @@ namespace TbhDpsMeter
             DrawFill(bx, by, bw, 1, new Color(1, 1, 1, 0.2f));
             GUI.Label(new Rect(bx + 5f, by + 1f, bw - 8f, 14f), $"<size=10><color=#cfd6e0>{when}</color></size>", _tiny);
             GUI.Label(new Rect(bx + 5f, by + 14f, bw - 8f, 14f), $"<size=11><color=#eaf3ee>{PriceStore.Format(cents[idx])}</color></size>", _tiny);
-            GUI.Label(new Rect(bx + 5f, by + 28f, bw - 8f, 14f), $"<size=10><color={dcol}>vs現在 {sign}{dpct:0.#}%</color></size>", _tiny);
+            GUI.Label(new Rect(bx + 5f, by + 28f, bw - 8f, 14f), $"<size=10><color={dcol}>{Loc.G("price_vsnow")} {sign}{dpct:0.#}%</color></size>", _tiny);
         }
 
         // 5-level order book: asks (red, highest at top) / spread / bids (green, highest at top), each row a

@@ -446,7 +446,7 @@ namespace TbhDpsMeter
                         DrawRect(ix, cy + lh * 0.32f, 9, 9, ClassColor(key));
                         string nm = HeroProbe.HeroName(key);
                         GUI.Label(new Rect(ix + 14, cy, minusX - (ix + 14), lh),
-                            $"{nm} <size=10><color=#9aa3b0>攻{hcs.AttackDamage * mu:0} → {FmtNum(predDps)}/s</color></size>", _label);
+                            $"{nm} <size=10><color=#9aa3b0>{Loc.G("lbl_atk")}{hcs.AttackDamage * mu:0} → {FmtNum(predDps)}/s</color></size>", _label);
                         var rMinus = new Rect(minusX, cy, ctrlW, lh - 2);
                         var rPlus = new Rect(plusX, cy, ctrlW, lh - 2);
                         GUI.Button(rMinus, "−", _btn);

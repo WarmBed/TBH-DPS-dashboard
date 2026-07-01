@@ -440,7 +440,7 @@ namespace TbhDpsMeter
                         ly = Row2(ly, subW, lx, rxc, Loc.G(st.Key), FmtStat(st.Baseline), FmtStat(st.Current), DeltaColor(st.Baseline, st.Current, true));
                     }
                     if (statRows > MaxStat)
-                    { GUI.Label(new Rect(lx, ly, leftColW, lh), $"<size=10><color=#8a93a0>滾輪 ↕ {_statScroll + 1}–{send}/{statRows}</color></size>", _tiny); ly += lh; }
+                    { GUI.Label(new Rect(lx, ly, leftColW, lh), $"<size=10><color=#8a93a0>{Loc.G("cmp_scroll")} ↕ {_statScroll + 1}–{send}/{statRows}</color></size>", _tiny); ly += lh; }
                 }
                 GUI.Label(new Rect(lx, ly, leftColW, lh), Loc.G("dmg_dist"), _dim); ly += lh;
                 DrawDist(lx + 34, ly, leftColW - 34, 11, baseline);
