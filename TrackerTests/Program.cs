@@ -138,6 +138,9 @@ class Tests
         JsonTests();
         FarmTests();
         FarmDivisorTests();
+        ClearTimeSimTests();
+        DamageFormulaTests();
+        FitEngineTests();
         RunRetentionTests();
         WavDecoderTests();
 
@@ -228,31 +231,41 @@ class Tests
 
         // --- GearScore ---
         var giLegendary = new GearItem { Grade = "LEGENDARY", Level = 80 };
-        giLegendary.Affixes.Add(new Affix("attack", 100));      // 100*1
-        giLegendary.Sockets.Add(new Affix("critrate", 0.03));   // 0.03*1000 = 30
+        giLegendary.Affixes.Add(new Affix("attack", 100));      // filled socket: +40 flat + 100*1 attack
+        giLegendary.Sockets.Add(new Affix("critrate", 0.03));   // live-path socket stat: 0.03*1000 = 30
         var isLeg = GearScore.ScoreItem(giLegendary);
-        // 250 (LEGENDARY) + 160 (80*2) + 100 (attack) + 30 (socket crit) = 540
-        Check("gearscore item = 540", Near(isLeg.Total, 540), isLeg.Total);
+        // 250 (LEGENDARY) + 160 (80*2) + 40 (1 filled socket) + 100 (attack) + 30 (socket crit) = 580
+        Check("gearscore item = 580", Near(isLeg.Total, 580), isLeg.Total);
         Check("gearscore unknown grade = 0 base", Near(GearScore.GradePoints(""), 0), GearScore.GradePoints(""));
         Check("gearscore unknown stat weight = 1", Near(GearScore.WeightOf("nonsense"), 1), GearScore.WeightOf("nonsense"));
 
         var gsSnap = new CharacterSnapshot();
         gsSnap.Equipment.Add(giLegendary);
         gsSnap.Equipment.Add(new GearItem { Grade = "RARE", Level = 0 });   // 120 + 0
-        Check("gearscore character total = 660", Near(GearScore.ScoreCharacter(gsSnap).Total, 660), GearScore.ScoreCharacter(gsSnap).Total);
-        // attack/defence split: attack=100 (offensive), hp is defensive
+        // giLegendary 580 + RARE/0 (120) = 700
+        Check("gearscore character total = 700", Near(GearScore.ScoreCharacter(gsSnap).Total, 700), GearScore.ScoreCharacter(gsSnap).Total);
+        // attack/defence split: the attack stat buckets offensive, hp defensive; the 2 filled-socket flats
+        // (no GearType → neutral) bucket to attack.
         var giMix = new GearItem();
-        giMix.Affixes.Add(new Affix("attack", 100));  // offensive
-        giMix.Affixes.Add(new Affix("hp", 500));      // defensive: 500*0.1 = 50
+        giMix.Affixes.Add(new Affix("attack", 100));  // offensive stat (also a filled socket: +40 base)
+        giMix.Affixes.Add(new Affix("hp", 500));      // defensive 500*0.1=50 (also a filled socket: +40 base)
         var isMix = GearScore.ScoreItem(giMix);
-        Check("gearscore attack bucket = 100", Near(isMix.Attack, 100), isMix.Attack);
+        // 2 filled sockets → 80 base → neutral GearType buckets it to attack → 100 + 80 = 180
+        Check("gearscore attack bucket = 180", Near(isMix.Attack, 180), isMix.Attack);
         Check("gearscore defense bucket = 50", Near(isMix.Defense, 50), isMix.Defense);
         Check("gearscore null item = 0", Near(GearScore.ScoreItem(null).Total, 0), GearScore.ScoreItem(null).Total);
 
-        // socket counts (裝飾/雕刻/銘文) score at 40 pts each
-        var giSock = new GearItem { Grade = "RARE", DecoCount = 2, EngraveCount = 1, InscribeCount = 0 };
-        // 120 (rare) + (2+1+0)*40 = 240
-        Check("gearscore sockets = 240", Near(GearScore.ScoreItem(giSock).Total, 240), GearScore.ScoreItem(giSock).Total);
+        // FILLED sockets = non-empty EnchantData enchants (g.Affixes), scored at 40 pts each (plus their
+        // own stat value). The save's *AppliedTotalCount fields are operation tallies, NOT slot counts.
+        var giSock = new GearItem { Grade = "RARE", DecoCount = 4, EngraveCount = 1, InscribeCount = 0 };
+        giSock.Affixes.Add(new Affix("attack", 10, "FLAT", 3));   // deco    → 40 socket + 10 attack
+        giSock.Affixes.Add(new Affix("attack", 20, "FLAT", 3));   // deco    → 40 socket + 20 attack
+        giSock.Affixes.Add(new Affix("attack", 30, "FLAT", 4));   // engrave → 40 socket + 30 attack
+        // 120 (rare) + 3 filled*40 + (10+20+30) attack = 120 + 120 + 60 = 300; the 4/1/0 tallies are ignored
+        Check("gearscore filled sockets = 300", Near(GearScore.ScoreItem(giSock).Total, 300), GearScore.ScoreItem(giSock).Total);
+        // bogus applied tallies (no real enchants) must NOT inflate the score — only the grade base remains
+        var giTally = new GearItem { Grade = "RARE", DecoCount = 4, EngraveCount = 1, InscribeCount = 0 };
+        Check("gearscore ignores applied tallies = 120", Near(GearScore.ScoreItem(giTally).Total, 120), GearScore.ScoreItem(giTally).Total);
 
         Console.WriteLine(_fail == 0 ? "\nALL TESTS PASSED" : $"\n{_fail} TEST(S) FAILED");
         return _fail == 0 ? 0 : 1;
@@ -403,6 +416,7 @@ class Tests
         snap.Equipment.Add(g);
         snap.Skills.Add(new SkillEntry("Arrow Rain", 3));
         snap.Character = "priest";
+        snap.DamageDealt = 88000;
         r.Party.Add(snap);
 
         string text = RunSerializer.Serialize(r);
@@ -422,6 +436,7 @@ class Tests
         Check("[ser] snapshot captured", snap2 != null && snap2.Captured, snap2 != null);
         Check("[ser] character id", snap2.Character == "priest", snap2.Character);
         Check("[ser] snap stat", snap2.Stats.Count == 1 && Near(snap2.Stats[0].Value, 1240), snap2.Stats.Count);
+        Check("[ser] snap per-hero damage", Near(snap2.DamageDealt, 88000), snap2.DamageDealt);
         Check("[ser] snap gear+affixes", snap2.Equipment.Count == 1 && snap2.Equipment[0].Affixes.Count == 2, snap2.Equipment.Count);
         Check("[ser] gear name preserved", snap2.Equipment[0].Name == "Flame Bow", snap2.Equipment[0].Name);
         Check("[ser] gear affix value", Near(snap2.Equipment[0].Affixes[1].Value, 5.5), snap2.Equipment[0].Affixes[1].Value);
@@ -558,6 +573,22 @@ class Tests
         Check("[farm] clear time = fastest, not median", Near(r24m.ClearSec, 245, 1), r24m.ClearSec);
         Check("[farm] merged run rate still ~1302", Near(r24m.GoldPerSec, 319000.0/245, 1), r24m.GoldPerSec);
 
+        // -- gold not yet flushed to the save (delta 0) must NOT discard the round --
+        // Gold is read from the periodically-flushed save, so most rounds read delta=0; exp is read live
+        // and is per-round accurate. A gold=0 run must still measure exp/sec + clear time (else F6 only
+        // updates when the save flushes, i.e. on stage switch). A mislabeled run (wrong NONZERO gold) is
+        // still rejected by the gold-ratio outlier filter.
+        var gz = new System.Collections.Generic.List<RunRecord>
+        {
+            Run("2-5 HELL", 243246, 4661825, 226, 3, 65),   // one gold-valid run so calibration exists
+            Run("2-4 HELL", 0, 6160000, 245, 3, 65),         // gold not flushed (0) but exp is real
+        };
+        var rowsGZ = FarmPlanner.Rank(stages, gz, out _, 65);
+        var r24gz = rowsGZ.Find(x => x.Stage.StageId == "2-4 HELL");
+        Check("[farm] gold=0 round still measured", r24gz.Measured, r24gz.Measured);
+        Check("[farm] gold=0 round exp/s per-round", Near(r24gz.ExpPerSec, 6160000.0/245, 1), r24gz.ExpPerSec);
+        Check("[farm] gold=0 round clear time real", Near(r24gz.ClearSec, 245, 1), r24gz.ClearSec);
+
         BuildFingerprintTests(stages);
     }
 
@@ -640,6 +671,224 @@ class Tests
         Check("[farm] legacy no-per-hero-exp falls back to party count (2)", FarmPlanner.EffectivePartyForExp(r3) == 2, FarmPlanner.EffectivePartyForExp(r3));
 
         Check("[farm] empty party divisor 0", FarmPlanner.EffectivePartyForExp(new RunRecord()) == 0, FarmPlanner.EffectivePartyForExp(new RunRecord()));
+    }
+
+    // ================= ClearTimeSim (DPS/speed what-if simulator) =================
+    static void ClearTimeSimTests()
+    {
+        Console.WriteLine("\n-- ClearTimeSim --");
+
+        // F = Σ share×mult: sorcerer(301) 60% ×1.5 + knight(101) 40% ×1.0 = 1.30
+        var shares = new System.Collections.Generic.Dictionary<int, double> { { 301, 0.6 }, { 101, 0.4 } };
+        var mult = new System.Collections.Generic.Dictionary<int, double> { { 301, 1.5 } };
+        Check("[sim] F = Σ share×mult = 1.30", Near(ClearTimeSim.PartyDpsFactor(shares, mult), 1.30), ClearTimeSim.PartyDpsFactor(shares, mult));
+
+        // a benched (0%-share) hero with a huge mult must NOT change F
+        var sharesB = new System.Collections.Generic.Dictionary<int, double> { { 101, 1.0 }, { 401, 0.0 } };
+        var multB = new System.Collections.Generic.Dictionary<int, double> { { 401, 5.0 } };
+        Check("[sim] benched 0%-share hero doesn't move F", Near(ClearTimeSim.PartyDpsFactor(sharesB, multB), 1.0), ClearTimeSim.PartyDpsFactor(sharesB, multB));
+
+        // no fight yet (empty shares) -> F clamps to 1 (no change)
+        Check("[sim] empty shares -> F=1", Near(ClearTimeSim.PartyDpsFactor(new System.Collections.Generic.Dictionary<int, double>(), mult), 1.0), ClearTimeSim.PartyDpsFactor(new System.Collections.Generic.Dictionary<int, double>(), mult));
+
+        // --- SimulateSplit: real measured 有效輸出/停輸出. DPS compresses active, speed compresses idle ---
+        var sd = ClearTimeSim.SimulateSplit(100, 0, 2.0, 1.0);   // pure active -> DPS×2 halves; speed irrelevant
+        Check("[sim] pure-active DPS×2 halves", Near(sd.NewClear, 50) && Near(sd.SavedPct, 0.5), sd.NewClear);
+        var ssp = ClearTimeSim.SimulateSplit(0, 100, 5.0, 2.0);  // pure idle -> speed×2 halves; DPS irrelevant
+        Check("[sim] pure-idle speed×2 halves", Near(ssp.NewClear, 50), ssp.NewClear);
+        var sm = ClearTimeSim.SimulateSplit(60, 40, 2.0, 1.0);   // 60/2 + 40 = 70
+        Check("[sim] split mixed newClear = 70", Near(sm.NewClear, 70) && Near(sm.SavedSec, 30), sm.NewClear);
+        Check("[sim] split dpsFrac = active/total = 0.6", Near(sm.DpsFrac, 0.6), sm.DpsFrac);
+        var sz = ClearTimeSim.SimulateSplit(0, 0, 2.0, 2.0);
+        Check("[sim] split zero -> nothing", Near(sz.NewClear, 0) && Near(sz.SavedSec, 0), sz.NewClear);
+        // the real 1-4 numbers (active 90.5 / idle 55.5), F=2.11: 38% is movement DPS can't touch -> ~33%, NOT 52%
+        var s14 = ClearTimeSim.SimulateSplit(90.5, 55.5, 2.11, 1.0);
+        Check("[sim] 1-4 real split saves ~33% (not 52%)", s14.SavedPct > 0.30 && s14.SavedPct < 0.36, s14.SavedPct);
+
+        // --- SimulateFloor: floor (0.8/wave + 4.25) fixed; everything above is DPS-bound ---
+        Check("[sim] FixedFloor(29) = 4.25 + 0.8×29 = 27.45", Near(ClearTimeSim.FixedFloor(29), 27.45), ClearTimeSim.FixedFloor(29));
+        var sf = ClearTimeSim.SimulateFloor(100, 29, 2.0);       // floor 27.45; (100-27.45)/2 + 27.45 = 63.725
+        Check("[sim] floor model 100s/29w/×2 = 63.7", Near(sf.NewClear, 63.725, 0.01), sf.NewClear);
+        var sf1 = ClearTimeSim.SimulateFloor(100, 29, 1.0);      // no DPS change -> unchanged
+        Check("[sim] floor model ×1 unchanged", Near(sf1.NewClear, 100), sf1.NewClear);
+        var sft = ClearTimeSim.SimulateFloor(3, 1, 5.0);         // tiny stage already at floor (5.05 > 3) -> clamps, no save
+        Check("[sim] floor clamps tiny stage", Near(sft.NewClear, 3), sft.NewClear);
+
+        // --- SimulateFallback: an uncleared stage uses an average active-fraction ---
+        var fb = ClearTimeSim.SimulateFallback(100, 0.6, 2.0, 1.0);   // 100*(0.6/2 + 0.4/1) = 70
+        Check("[sim] fallback mixed = 70", Near(fb.NewClear, 70), fb.NewClear);
+
+        // ===== WaveSim: the iterative kill-by-kill simulator (overkill / cadence / AoE) =====
+        Console.WriteLine("-- WaveSim --");
+        var oneStream = new System.Collections.Generic.List<AtkStream> { new AtkStream(10, 1, 1) };
+        Check("[wave] 100hp /10perHit /1s = 10 hits = 10s", Near(WaveSim.WaveTime(100, 1, oneStream), 10), WaveSim.WaveTime(100, 1, oneStream));
+        // OVERKILL: 200 per hit one-shots 100hp in ONE cast — NOT 0.5s. More damage past one-shot is wasted.
+        var bigHit = new System.Collections.Generic.List<AtkStream> { new AtkStream(200, 1, 1) };
+        Check("[wave] overkill one-shot = 1 cast = 1s (not 0.5)", Near(WaveSim.WaveTime(100, 1, bigHit), 1), WaveSim.WaveTime(100, 1, bigHit));
+        Check("[wave] overkill ×10 still 1 cast", Near(WaveSim.WaveTime(100, 1, new System.Collections.Generic.List<AtkStream> { new AtkStream(2000, 1, 1) }), 1), 1);
+        // CADENCE FLOOR: 5 one-shot monsters, single-target = 5 casts = 5s — DPS past one-shot can't beat it.
+        Check("[wave] 5 one-shot monsters single-target = 5s", Near(WaveSim.WaveTime(100, 5, bigHit), 5), WaveSim.WaveTime(100, 5, bigHit));
+        // AoE clears the cadence floor: same 5 monsters, Targets=5 = 1 cast = 1s.
+        var aoe = new System.Collections.Generic.List<AtkStream> { new AtkStream(200, 1, 5) };
+        Check("[wave] 5 one-shot AoE(T5) = 1 cast = 1s", Near(WaveSim.WaveTime(100, 5, aoe), 1), WaveSim.WaveTime(100, 5, aoe));
+        // 5 tanky monsters, single-target: 50 hits @1/s = 50s (DPS-bound, scales with DPS)
+        Check("[wave] 5×100hp /10perHit single = 50s", Near(WaveSim.WaveTime(100, 5, oneStream), 50), WaveSim.WaveTime(100, 5, oneStream));
+        // two streams stack: 20 dmg/s -> 100hp in 5s
+        var two = new System.Collections.Generic.List<AtkStream> { new AtkStream(10, 1, 1), new AtkStream(10, 1, 1) };
+        Check("[wave] two 10/1s streams kill 100hp in 5s", Near(WaveSim.WaveTime(100, 1, two), 5), WaveSim.WaveTime(100, 1, two));
+        Check("[wave] no usable stream = +inf", double.IsPositiveInfinity(WaveSim.WaveTime(100, 1, new System.Collections.Generic.List<AtkStream>())), -1);
+        // StageTime: 2 waves × (0.8 spawn + 5s battle) + 4.25 end, no approach/entry/boss = 2*(5.8)+4.25 = 15.85
+        // AoE multi-target must hit DISTINCT monsters (not re-hit the lowest): 3×100hp, T3 @60perHit ⇒
+        // cast1 each→40, cast2 each→dead = 2 casts = 2s. The re-hit bug would take 3 casts (3s).
+        var aoeMulti = new System.Collections.Generic.List<AtkStream> { new AtkStream(60, 1, 3) };
+        Check("[wave] AoE(T3) strikes DISTINCT monsters: 3×100hp /60 = 2 casts = 2s", Near(WaveSim.WaveTime(100, 3, aoeMulti), 2), WaveSim.WaveTime(100, 3, aoeMulti));
+        double st = WaveSim.StageTime(2, 5, 100, bigHit, 0, 0, 0);
+        Check("[wave] StageTime 2w×(0.8+5)+4.25 = 15.85", Near(st, 15.85, 0.01), st);
+        var fb2 = ClearTimeSim.SimulateFallback(100, 1.0, 1.0, 5.0);  // all-active -> speed alone saves 0
+        Check("[sim] fallback dpsFrac=1: speed alone saves nothing", Near(fb2.SavedSec, 0), fb2.SavedSec);
+        var fb0 = ClearTimeSim.SimulateFallback(0, 0.6, 2.0, 2.0);
+        Check("[sim] fallback unknown clear (0) -> nothing", Near(fb0.NewClear, 0) && Near(fb0.SavedSec, 0), fb0.NewClear);
+
+        // ===== HeroKillRate: the SERIALIZED action-queue cadence (decompiled Unit.gqh + Hero.gre CDR cap) =====
+        // Real loop: ONE action per frame, a ready COOLDOWN skill SUPPRESSES the base auto, the cast occupies an
+        // animation lock (clip/CastSpeed). CDR is HARD-CAPPED at 0.75 (decompiled). An auto-only hero scales with
+        // AttackSpeed; a cooldown caster scales with CDR only UP TO the 0.75 cap, then with AttackSpeed/AoE.
+        Console.WriteLine("-- HeroKillRate (serialized cadence + 0.75 CDR cap) --");
+        // 201 ranger: base auto (act0) + count skill av5 single-target.  301 mage: base auto + 2 cooldown AoE.
+        SkillDb.Load("{\"20001\":[0,1,0,[1]],\"20101\":[1,5,0,[1]],\"30001\":[0,1,0,[1]],\"30301\":[2,15,1,[1]],\"30601\":[2,18,1,[1]]}");
+        var rngSk = new System.Collections.Generic.List<int> { 20101 };
+        var mageSk = new System.Collections.Generic.List<int> { 30301, 30601 };
+        // (1) ranger = pure auto, single-target ⇒ rate == AttackSpeed, and CDR/AoE do NOTHING (no cooldown skills)
+        double rR0 = StreamBuilder.HeroKillRate(201, 1.0, 0.0, rngSk, null);
+        Check("[kr] ranger rate == AttackSpeed (1.0)", Near(rR0, 1.0), rR0);
+        Check("[kr] ranger +20% aspd ⇒ +20% rate", Near(StreamBuilder.HeroKillRate(201, 1.2, 0.0, rngSk, null), 1.2), StreamBuilder.HeroKillRate(201, 1.2, 0.0, rngSk, null));
+        Check("[kr] ranger CDR is INERT (no cooldown skills)", Near(StreamBuilder.HeroKillRate(201, 1.0, 0.8, rngSk, null), rR0), StreamBuilder.HeroKillRate(201, 1.0, 0.8, rngSk, null));
+        Check("[kr] ranger AoE INERT (single-target skills)", Near(StreamBuilder.HeroKillRate(201, 1.0, 0.0, rngSk, null, 1.5), rR0), true);
+        // (2) CDR HARD CAP 0.75: a mage already past 0.75 gets NOTHING from more CDR (the user's 0.838 mage)
+        double mCap = StreamBuilder.HeroKillRate(301, 1.11, 0.75, mageSk, null);
+        Check("[kr] CDR capped at 0.75: 0.80 == 0.75", Near(StreamBuilder.HeroKillRate(301, 1.11, 0.80, mageSk, null), mCap), 0);
+        Check("[kr] CDR capped at 0.75: 0.95 == 0.75", Near(StreamBuilder.HeroKillRate(301, 1.11, 0.95, mageSk, null), mCap), 0);
+        Check("[kr] over-cap mage: more CDR is INERT (0.90==0.75)", Near(StreamBuilder.HeroKillRate(301, 1.11, 0.90, mageSk, null), mCap), 0);
+        // (3) below the cap CDR DOES help (cooldowns speed up); over the cap AttackSpeed + AoE are the levers
+        Check("[kr] below-cap: +CDR speeds cooldowns (0.5 > 0.3)", StreamBuilder.HeroKillRate(301, 1.11, 0.50, mageSk, null) > StreamBuilder.HeroKillRate(301, 1.11, 0.30, mageSk, null), 0);
+        Check("[kr] over-cap mage: +aspd helps (auto-bound)", StreamBuilder.HeroKillRate(301, 1.332, 0.80, mageSk, null) > mCap, 0);
+        Check("[kr] over-cap mage: +AoE helps (nuke targets)", StreamBuilder.HeroKillRate(301, 1.11, 0.80, mageSk, null, 1.5) > mCap, 0);
+        // (4) CastSpeed shortens the cast lock — never lowers the rate (frees auto time / faster casts when bound)
+        Check("[kr] CastSpeed never hurts", StreamBuilder.HeroKillRate(301, 1.11, 0.80, mageSk, null, 1.0, 1.5) >= mCap - 1e-9, 0);
+
+        // --- AggregateTiming: median active/idle over a stage's runs that captured a split ---
+        var runs = new System.Collections.Generic.List<RunRecord>
+        {
+            new RunRecord { StageId = "3-6 TORMENT", ActiveSeconds = 90f, IdleSeconds = 50f },
+            new RunRecord { StageId = "3-6 TORMENT", ActiveSeconds = 110f, IdleSeconds = 60f },
+            new RunRecord { StageId = "3-6 TORMENT", ActiveSeconds = 0f, IdleSeconds = 0f },   // no split -> excluded
+            new RunRecord { StageId = "1-1 NORMAL", ActiveSeconds = 20f, IdleSeconds = 10f },
+        };
+        var tA = ClearTimeSim.AggregateTiming(runs, "3-6 TORMENT", null);
+        Check("[sim] aggregate has data, 2 samples", tA.HasData && tA.Samples == 2, tA.Samples);
+        Check("[sim] aggregate median active = 100", Near(tA.ActiveSec, 100), tA.ActiveSec);
+        Check("[sim] aggregate median idle = 55", Near(tA.IdleSec, 55), tA.IdleSec);
+        var tB = ClearTimeSim.AggregateTiming(runs, "9-9 HELL", null);
+        Check("[sim] aggregate no runs -> no data", !tB.HasData, tB.HasData);
+
+        // summary: avg savedPct over known rows; best by savedSec; 0-clear excluded
+        var rows = new System.Collections.Generic.List<SimRow>
+        {
+            ClearTimeSim.SimulateSplit(100, 0, 2.0, 1.0), // saved 50, 50%
+            ClearTimeSim.SimulateSplit(200, 0, 2.0, 1.0), // saved 100, 50%
+            ClearTimeSim.SimulateSplit(0, 0, 2.0, 1.0),   // excluded
+        };
+        var sum = ClearTimeSim.Summarize(rows, 2.0);
+        Check("[sim] summary counts only known-clear rows (2)", sum.Counted == 2, sum.Counted);
+        Check("[sim] summary avg savedPct = 0.5", Near(sum.AvgSavedPct, 0.5), sum.AvgSavedPct);
+        Check("[sim] summary best index = 1 (saved 100s)", sum.BestIndex == 1, sum.BestIndex);
+        Check("[sim] summary carries party DPS factor", Near(sum.PartyDpsFactor, 2.0), sum.PartyDpsFactor);
+
+        // --- BuildStat: sum a run's gear stat (stable key e.g. "AoE"=range), per-hero or whole party ---
+        var run = new RunRecord();
+        var mage = new CharacterSnapshot { Character = "301" };
+        var mg1 = new GearItem(); mg1.Affixes.Add(new Affix("AoE", 100)); mg1.Affixes.Add(new Affix("attack", 50));
+        var mg2 = new GearItem(); mg2.Affixes.Add(new Affix("AoE", 60));
+        mage.Equipment.Add(mg1); mage.Equipment.Add(mg2);
+        var knight = new CharacterSnapshot { Character = "101" };
+        var kg1 = new GearItem(); kg1.Affixes.Add(new Affix("AoE", 30));
+        knight.Equipment.Add(kg1);
+        run.Party.Add(mage); run.Party.Add(knight);
+        Check("[sim] BuildStat per-hero range (mage AoE = 160)", Near(ClearTimeSim.BuildStat(run, "AoE", "301"), 160), ClearTimeSim.BuildStat(run, "AoE", "301"));
+        Check("[sim] BuildStat whole-party range (190)", Near(ClearTimeSim.BuildStat(run, "AoE", null), 190), ClearTimeSim.BuildStat(run, "AoE", null));
+        Check("[sim] BuildStat per-hero attack (mage = 50)", Near(ClearTimeSim.BuildStat(run, "attack", "301"), 50), ClearTimeSim.BuildStat(run, "attack", "301"));
+        Check("[sim] BuildStat missing stat -> 0", Near(ClearTimeSim.BuildStat(run, "mspd", "301"), 0), ClearTimeSim.BuildStat(run, "mspd", "301"));
+        Check("[sim] BuildStat unknown hero -> 0", Near(ClearTimeSim.BuildStat(run, "AoE", "999"), 0), ClearTimeSim.BuildStat(run, "AoE", "999"));
+    }
+
+    // ================= DamageFormula (slot for the native-decompiled combat formula) =================
+    static void DamageFormulaTests()
+    {
+        Console.WriteLine("\n-- DamageFormula --");
+        // expected crit multiplier on average damage = 1 + chance×(critDamage−1)
+        Check("[dmg] crit 12% ×3.57 -> 1.308", Near(DamageFormula.CritMultiplier(0.12, 3.57), 1.3084, 0.001), DamageFormula.CritMultiplier(0.12, 3.57));
+        Check("[dmg] 0% crit -> 1.0", Near(DamageFormula.CritMultiplier(0, 5), 1.0), DamageFormula.CritMultiplier(0, 5));
+        Check("[dmg] 100% crit ×2 -> 2.0", Near(DamageFormula.CritMultiplier(1.0, 2.0), 2.0), DamageFormula.CritMultiplier(1.0, 2.0));
+        Check("[dmg] critDamage<1 clamped (no negative crit)", Near(DamageFormula.CritMultiplier(0.5, 0.5), 1.0), DamageFormula.CritMultiplier(0.5, 0.5));
+        Check("[dmg] chance>1 clamped to 1", Near(DamageFormula.CritMultiplier(2.0, 2.0), 2.0), DamageFormula.CritMultiplier(2.0, 2.0));
+        // placeholder ExpectedDps folds crit in: attack × aspd × critMult (real formula replaces this body)
+        var cs = new CombatStats { AttackDamage = 1000, AttackSpeed = 2, CritChance = 0, CritDamage = 3 };
+        Check("[dmg] placeholder dps = atk×aspd (no crit) = 2000", Near(DamageFormula.ExpectedDps(cs), 2000), DamageFormula.ExpectedDps(cs));
+    }
+
+    // ================= FitEngine (gear DB + stat aggregation) =================
+    static void FitEngineTests()
+    {
+        Console.WriteLine("\n-- FitEngine --");
+        GearDatabase.Reset();
+        string gj = "[{\"k\":301041,\"t\":\"BOW\",\"g\":\"RARE\",\"gg\":\"WEAPON\",\"l\":20,\"p\":\"MAIN_WEAPON\",\"n\":\"bow1\",\"s\":[[\"AttackDamage\",\"FLAT\",7],[\"AttackSpeed\",\"FLAT\",20],[\"AttackDamage\",\"ADDITIVE\",221]]}," +
+            "{\"k\":401001,\"t\":\"RING\",\"g\":\"COMMON\",\"gg\":\"ACCESSORY\",\"l\":1,\"p\":\"RING\",\"n\":\"ring1\",\"s\":[[\"CriticalChance\",\"FLAT\",5]]}]";
+        GearDatabase.LoadGear(gj);
+        Check("[fit] gear count 2", GearDatabase.Count == 2, GearDatabase.Count);
+        var bow = GearDatabase.ByKey(301041);
+        Check("[fit] bow type/slot", bow != null && bow.Type == "BOW" && bow.Slot == "MAIN_WEAPON", bow != null ? bow.Type : "null");
+        Check("[fit] bow 3 stats", bow != null && bow.Stats.Count == 3, bow != null ? bow.Stats.Count : -1);
+        Check("[fit] bySlot MAIN_WEAPON=1", GearDatabase.BySlot("MAIN_WEAPON").Count == 1, GearDatabase.BySlot("MAIN_WEAPON").Count);
+        Check("[fit] bySlot RING=1", GearDatabase.BySlot("RING").Count == 1, GearDatabase.BySlot("RING").Count);
+
+        // material catalog: matKey -> type + per-gear-group effect
+        string mj = "{\"110001\":{\"t\":\"D\",\"n\":\"mat1\",\"w\":[\"AttackDamage\",\"FLAT\",10,10,2],\"a\":[\"Armor\",\"FLAT\",5,5,1]}}";
+        MatCatalog.Load(mj);
+        var sm = MatCatalog.Get(110001);
+        Check("[fit] mat type D", sm != null && sm.Type == 'D', sm != null ? sm.Type.ToString() : "null");
+        Check("[fit] mat weapon effect AttackDamage+10", sm != null && sm.HasW && sm.W.Stat == "AttackDamage" && Near(sm.W.Value, 10), sm != null && sm.HasW ? sm.W.Value : -1);
+        Check("[fit] mat weapon tier 2", sm != null && sm.WTier == 2, sm != null ? sm.WTier : -1);
+        Check("[fit] mat no accessory effect", sm != null && !sm.HasFor("ACCESSORY"), sm != null ? sm.HasFor("ACCESSORY") : true);
+        Check("[fit] catalog byType D = 1", MatCatalog.ByType('D').Count == 1, MatCatalog.ByType('D').Count);
+
+        // socket counts per grade
+        SocketDb.Load("{\"BEYOND\":[2,2,1],\"COMMON\":[0,0,0]}");
+        var bc = SocketDb.Counts("BEYOND");
+        Check("[fit] BEYOND sockets 2/2/1", bc[0] == 2 && bc[1] == 2 && bc[2] == 1, string.Join(",", bc));
+
+        // aggregation: percent mods are ×10, so ADDITIVE 221 = 22.1% -> 7 × (1 + 221/1000) = 8.547 ; AttackSpeed FLAT 20
+        var agg = StatAggregator.Aggregate(bow.Stats);
+        Check("[fit] agg AttackDamage = 7×1.221 = 8.547", Near(agg["AttackDamage"], 8.547, 0.01), agg.ContainsKey("AttackDamage") ? agg["AttackDamage"] : -1);
+        Check("[fit] agg AttackSpeed = 20", Near(agg["AttackSpeed"], 20), agg.ContainsKey("AttackSpeed") ? agg["AttackSpeed"] : -1);
+        var agg2 = StatAggregator.Aggregate(new System.Collections.Generic.List<GearStat> { new GearStat("AttackDamage", "FLAT", 10), new GearStat("AttackDamage", "MULTIPLICATIVE", 50) });
+        Check("[fit] agg mult 10×1.05 = 10.5", Near(agg2["AttackDamage"], 10.5), agg2.ContainsKey("AttackDamage") ? agg2["AttackDamage"] : -1);
+
+        // socket folds into loadout stats: bow (slot 0) + weapon-deco AttackDamage+10 (FLAT) → (7+10)×1.221
+        var gear = new int[] { 301041, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        var socks = new System.Collections.Generic.Dictionary<int, int[]> { { 0, new int[] { 110001 } } };
+        var aggS = FitCalc.LoadoutStats(gear, socks);
+        Check("[fit] socket effect folds in (17×1.221=20.757)", aggS.ContainsKey("AttackDamage") && Near(aggS["AttackDamage"], 20.757, 0.01), aggS.ContainsKey("AttackDamage") ? aggS["AttackDamage"] : -1);
+
+        // flat/percent split: a percent-only stat (no flat base, the 範圍 case) keeps its factor instead of
+        // collapsing to 0. AreaOfEffect ADDITIVE 189 -> flat 0, pct 1.189 ; with live base 2.9 -> 2.9×1.189 = 3.448
+        var fpFlat = new System.Collections.Generic.Dictionary<string, double>();
+        var fpPct = new System.Collections.Generic.Dictionary<string, double>();
+        StatAggregator.AggregateFP(new System.Collections.Generic.List<GearStat> { new GearStat("AreaOfEffect", "ADDITIVE", 189) }, fpFlat, fpPct);
+        Check("[fit] FP percent-only flat = 0", fpFlat.ContainsKey("AreaOfEffect") && Near(fpFlat["AreaOfEffect"], 0), fpFlat.ContainsKey("AreaOfEffect") ? fpFlat["AreaOfEffect"] : -1);
+        Check("[fit] FP percent-only pct = 1.189", fpPct.ContainsKey("AreaOfEffect") && Near(fpPct["AreaOfEffect"], 1.189, 0.001), fpPct.ContainsKey("AreaOfEffect") ? fpPct["AreaOfEffect"] : -1);
+        // collapsed Aggregate would lose it (0 × 1.189 = 0) — this is the bug the FP split fixes
+        var collapsed = StatAggregator.Aggregate(new System.Collections.Generic.List<GearStat> { new GearStat("AreaOfEffect", "ADDITIVE", 189) });
+        Check("[fit] collapsed loses percent-only (=0)", Near(collapsed.ContainsKey("AreaOfEffect") ? collapsed["AreaOfEffect"] : 0, 0), collapsed.ContainsKey("AreaOfEffect") ? collapsed["AreaOfEffect"] : -1);
     }
 
     // ================= RunRetention (per-stage history) =================

@@ -318,7 +318,7 @@ namespace TbhDpsMeter
                 float tx = ix + rowH;
                 float ty = ry + (rowH - lh) * 0.5f;   // vertically centre the name in the row
                 string lvl = g.Level > 0 ? $" <color=#9aa1ad>Lv{g.Level}</color>" : "";
-                int sk = g.DecoCount + g.EngraveCount + g.InscribeCount;
+                int sk = g.Affixes.Count;   // FILLED sockets (non-empty EnchantData), not the over-counting applied tallies
                 string socks = sk > 0 ? $" <color=#67d6c3>{new string('◆', Mathf.Min(sk, 6))}{(sk > 6 ? "+" : "")}</color>" : "";
                 GUI.Label(new Rect(tx, ty, iw - rowH - 64, lh), $"<color=#{GradeColor(g.Grade)}>{g.Name}</color>{lvl}{socks}", _label);
                 GUI.Label(new Rect(x + w - Pad - 60, ty, 56, lh), $"<color=#7FB2FF>{ln.Score.Total:0}</color>", _label);
@@ -350,16 +350,17 @@ namespace TbhDpsMeter
             }
         }
 
-        // grade -> hex colour across TBH's 10-tier rarity ladder. Unknown -> grey.
-        private static string GradeColor(string grade)
+        // grade -> hex colour (NO leading '#') across TBH's 10-tier rarity ladder. Unknown -> grey.
+        // Public so the fitting bench colours item names from the same proven palette (one source of truth).
+        public static string GradeColor(string grade)
         {
             switch ((grade ?? "").ToUpperInvariant())
             {
                 case "COSMIC": return "FF4D6D";      // red-pink
                 case "DIVINE": return "FFD24D";      // gold
                 case "CELESTIAL": return "63E6E2";   // cyan
-                case "BEYOND": return "B197FC";      // violet
-                case "ARCANA": return "F783AC";      // pink
+                case "BEYOND": return "F783AC";      // pink (matches in-game 超凡)
+                case "ARCANA": return "B197FC";      // violet (matches in-game 至寶)
                 case "IMMORTAL": return "FF922B";    // orange
                 case "LEGENDARY": return "FFB13B";   // amber
                 case "RARE": return "4FA8FF";        // blue

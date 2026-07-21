@@ -71,7 +71,7 @@ namespace TbhDpsMeter
         }
 
         // Damage dealt to a monster — count hits whose attacker is on the hero/player side.
-        private static void MonsterDealt(DamageInfo __0)
+        private static void MonsterDealt(object __instance, DamageInfo __0)
         {
             try
             {
@@ -87,6 +87,7 @@ namespace TbhDpsMeter
                 int ck = HeroProbe.ReadHeroKeyOf(attacker);   // which hero dealt it (0 = unknown)
 
                 Plugin.Tracker.Record(amount, crit, type, Time.time, ck);
+                RealCombat.OnHit(__instance, amount, ck, Time.time);   // ground-truth effHP + AoE capture
                 if (Plugin.DebugDamage != null && Plugin.DebugDamage.Value)
                     Plugin.LogDamageSample(amount, crit, type);
             }

@@ -366,6 +366,12 @@ namespace TbhDpsMeter
                 foreach (var smp in _history) r.Samples.Add(smp);
                 r.WaveDurations.AddRange(_waveDurations);
                 r.Party.AddRange(CharacterReader.CaptureParty());
+                // stamp each hero's total damage from the DPS tracker's per-character rollup, matched by
+                // hero key, so every saved run records who dealt how much (for per-hero calibration).
+                if (s.ByChar != null)
+                    foreach (var cp in s.ByChar)
+                        foreach (var snap in r.Party)
+                            if (snap != null && snap.Character == cp.CharKey.ToString()) { snap.DamageDealt = cp.Amount; break; }
                 CharacterReader.FillRewards(r);   // gold/exp/box deltas vs the run baseline
 
                 // fold in the damage-taken (defense) side of the same encounter

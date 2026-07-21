@@ -22,7 +22,11 @@ namespace TbhDpsMeter
     {
         public string Name;
         public double Value;
-        public Affix(string name, double value) { Name = name; Value = value; }
+        public string Mod;   // "FLAT" / "ADDITIVE" / "MULTIPLICATIVE" (from EnchantData.ModType); "" if unknown
+        public int Recipe;   // EnchantData.RecipeType: 3=decoration / 4=engraving / 5=inscription (0 = unknown/legacy)
+        public Affix(string name, double value) { Name = name; Value = value; Mod = ""; Recipe = 0; }
+        public Affix(string name, double value, string mod) { Name = name; Value = value; Mod = mod; Recipe = 0; }
+        public Affix(string name, double value, string mod, int recipe) { Name = name; Value = value; Mod = mod; Recipe = recipe; }
     }
 
     /// <summary>One equipped item with its affixes/mods.</summary>
@@ -44,7 +48,9 @@ namespace TbhDpsMeter
         public readonly List<Affix> Affixes = new List<Affix>();
         /// <summary>Contents of the 裝飾/雕刻/銘文 sockets, each as a stat+value (live path; usually empty).</summary>
         public readonly List<Affix> Sockets = new List<Affix>();
-        /// <summary>Applied socket counts from the save (裝飾 / 雕刻 / 銘文). Scored per applied socket.</summary>
+        /// <summary>Applied socket TALLIES from the save (裝飾 / 雕刻 / 銘文 *AppliedTotalCount). These are
+        /// operation counts, NOT slot-fill counts, so they over-count sockets — for a real socket total use
+        /// Affixes.Count (filled) or SocketDb.Counts(grade) (max). Kept here only as the raw save shape.</summary>
         public int DecoCount, EngraveCount, InscribeCount;
         /// <summary>Item icon (a UnityEngine.Texture at runtime; typed object so the Unity-free
         /// TrackerTests build can compile RunModels). null when unavailable -> panel shows a glyph.</summary>
@@ -86,6 +92,9 @@ namespace TbhDpsMeter
         public double ExpGained;
         /// <summary>Character level at the time of the run (from the save). 0 = unknown.</summary>
         public int Level;
+        /// <summary>Total damage this character dealt during the run (from the DPS tracker's per-character
+        /// rollup). 0 = not captured. Per-hero DPS ≈ DamageDealt / run active seconds; share = / run total.</summary>
+        public double DamageDealt;
 
         public bool HasAny => Stats.Count > 0 || Equipment.Count > 0 || Skills.Count > 0;
     }

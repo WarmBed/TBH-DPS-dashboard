@@ -73,6 +73,7 @@ namespace TbhDpsMeter
             public int StageLevel;     // wiki stage level (for retention)
             public int HeroLevel;      // party level at the time of the run
             public bool ExpValid;
+            public bool GoldValid;     // gold delta is real (>0); false when the save hadn't flushed (delta 0)
             public string Sig;         // build signature of the run
             public bool Cur;           // true if this run is the current build
         }
@@ -172,9 +173,15 @@ namespace TbhDpsMeter
             {
                 if (r == null || string.IsNullOrEmpty(r.StageId) || r.Duration <= 0.01) continue;
                 if (!byId.TryGetValue(r.StageId, out var st)) continue;
-                if (st.ExpectedGold <= 0 || r.GoldGained <= 0) continue;   // gold must be sane
+                // Gold is read from the periodically-flushed save, so most rounds read delta=0 while exp is
+                // read live and is per-round accurate. Don't discard a round just because gold hasn't been
+                // flushed yet — keep it for exp/sec + clear time, and only feed gold-derived stats from the
+                // rounds where the gold delta is real. (A truly mislabeled run has wrong NONZERO gold and is
+                // still caught by the gold-ratio outlier filter below.)
+                bool goldValid = st.ExpectedGold > 0 && r.GoldGained > 0;
                 int party = EffectivePartyForExp(r);   // exp-earning heroes only — benched members don't dilute
                 bool expValid = party > 0 && st.ExpectedEXP > 0 && r.ExpGained > 0;
+                if (!goldValid && !expValid) continue;   // nothing usable at all
                 double expPerHero = expValid ? r.ExpGained / party : 0;
                 int heroLevel = r.RepLevel > 0 ? r.RepLevel : fallbackHeroLevel;
                 double ret = ExpRetention(heroLevel, st.Level);
@@ -183,10 +190,10 @@ namespace TbhDpsMeter
                 stats.Add(new RunStat
                 {
                     StageId = r.StageId,
-                    GoldRatio = r.GoldGained / st.ExpectedGold,
+                    GoldRatio = goldValid ? r.GoldGained / st.ExpectedGold : 0,
                     ExpRatio = pureExpRatio,
                     HpRate = r.Duration > 0 ? st.TotalHP / r.Duration : 0,
-                    GoldPerSec = r.GoldGained / r.Duration,
+                    GoldPerSec = goldValid ? r.GoldGained / r.Duration : 0,
                     ExpPerSec = expValid ? expPerHero / r.Duration : 0,
                     Duration = r.Duration,
                     Waves = st.Waves,
@@ -194,6 +201,7 @@ namespace TbhDpsMeter
                     StageLevel = st.Level,
                     HeroLevel = heroLevel,
                     ExpValid = expValid,
+                    GoldValid = goldValid,
                     Sig = sig,
                     Cur = !string.IsNullOrEmpty(currentSig) ? sig == currentSig : true,
                 });
@@ -204,9 +212,13 @@ namespace TbhDpsMeter
             var trusted = new List<RunStat>();
             if (stats.Count > 0)
             {
-                double medGold = Median(Select(stats, s => s.GoldRatio));
+                var goldRatios = new List<double>();
+                foreach (var s in stats) if (s.GoldValid) goldRatios.Add(s.GoldRatio);
+                double medGold = Median(goldRatios);
                 foreach (var s in stats)
-                    if (medGold <= 0 || (s.GoldRatio <= medGold * OutlierFactor && s.GoldRatio >= medGold / OutlierFactor))
+                    // gold=0 rounds (save not flushed) skip the gold-ratio check and ride on their exp;
+                    // gold-valid rounds must sit within the outlier band of the median gold ratio.
+                    if (!s.GoldValid || medGold <= 0 || (s.GoldRatio <= medGold * OutlierFactor && s.GoldRatio >= medGold / OutlierFactor))
                         trusted.Add(s);
             }
 
@@ -223,7 +235,9 @@ namespace TbhDpsMeter
             }
             if (calibRuns.Count > 0)
             {
-                calib.MGold = Median(Select(calibRuns, s => s.GoldRatio));
+                var goldRatios2 = new List<double>();
+                foreach (var s in calibRuns) if (s.GoldValid) goldRatios2.Add(s.GoldRatio);
+                calib.MGold = goldRatios2.Count > 0 ? Median(goldRatios2) : 1;
                 var expRatios = new List<double>();
                 foreach (var s in calibRuns) if (s.ExpValid) expRatios.Add(s.ExpRatio);
                 calib.MExp = expRatios.Count > 0 ? Median(expRatios) : calib.MGold;
@@ -280,10 +294,18 @@ namespace TbhDpsMeter
                     double minDur = rs[0].Duration;
                     foreach (var s in rs) if (s.Duration < minDur) minDur = s.Duration;
                     row.ClearSec = minDur;   // fastest clean clear
-                    row.GoldPerSec = Median(Select(rs, s => s.GoldPerSec));
-                    var eps = new List<double>();
-                    foreach (var s in rs) if (s.ExpValid) eps.Add(s.ExpPerSec);
-                    row.ExpPerSec = eps.Count > 0 ? Median(eps) : 0;   // real measured exp already reflects retention
+                    // Rates as total/total across the stage's runs (not a per-run median): this averages the
+                    // save's batched gold flush (most rounds read 0, one reads the lump) back into the correct
+                    // gold/sec, matches a single clean run exactly, and keeps exp/sec updating every round.
+                    double goldSum = 0, goldDur = 0, expSum = 0, expDur = 0;
+                    foreach (var s in rs)
+                    {
+                        goldSum += s.GoldPerSec * s.Duration; goldDur += s.Duration;
+                        if (s.ExpValid) { expSum += s.ExpPerSec * s.Duration; expDur += s.Duration; }
+                    }
+                    row.GoldPerSec = goldSum > 0 && goldDur > 0 ? goldSum / goldDur
+                        : (calib.HasData && row.ClearSec > 0 ? st.ExpectedGold * calib.MGold / row.ClearSec : 0);
+                    row.ExpPerSec = expDur > 0 ? expSum / expDur : 0;   // real measured exp already reflects retention
                 }
                 else if (calib.HasData)
                 {

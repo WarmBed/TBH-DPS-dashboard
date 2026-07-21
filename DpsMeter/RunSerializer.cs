@@ -81,6 +81,7 @@ namespace TbhDpsMeter
                 sb.Append("char=").Append(Clean(snap.Character)).Append(FS).Append(Clean(snap.CharacterName)).Append('\n');
                 if (snap.ExpGained != 0) sb.Append("cexp=").Append(snap.ExpGained.ToString(Inv)).Append('\n');
                 if (snap.Level != 0) sb.Append("clevel=").Append(snap.Level).Append('\n');
+                if (snap.DamageDealt != 0) sb.Append("cdmg=").Append(snap.DamageDealt.ToString(Inv)).Append('\n');
                 foreach (var st in snap.Stats)
                     sb.Append("stat=").Append(Clean(st.Key)).Append(':').Append(st.Value.ToString(Inv)).Append('\n');
                 foreach (var g in snap.Equipment)
@@ -146,6 +147,7 @@ namespace TbhDpsMeter
                     }
                     case "cexp": Snap().ExpGained = D(v); break;
                     case "clevel": Snap().Level = (int)D(v); break;
+                    case "cdmg": Snap().DamageDealt = D(v); break;
                     case "type":
                     {
                         int c = v.IndexOf(':');

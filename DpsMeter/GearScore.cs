@@ -24,7 +24,7 @@ namespace TbhDpsMeter
         };
         private const double GradeDefault = 0;
         private const double LevelWeight = 2.0;
-        // points per applied socket (裝飾/雕刻/銘文) — the save records counts, not per-gem stats.
+        // points per FILLED socket (裝飾/雕刻/銘文) — i.e. per non-empty EnchantData enchant on the item.
         private const double SocketWeight = 40.0;
 
         // Per-stat normalisation so attack (~hundreds) and crit% (~0.05) contribute comparably.
@@ -99,7 +99,10 @@ namespace TbhDpsMeter
             s.Parts.Add(new Part("grade", gb)); s.Total += gb; baseVal += gb;
             double lv = g.Level * LevelWeight;
             if (lv != 0) { s.Parts.Add(new Part("level", lv)); s.Total += lv; baseVal += lv; }
-            int sockets = g.DecoCount + g.EngraveCount + g.InscribeCount;
+            // FILLED sockets = the non-empty EnchantData enchants (g.Affixes). The save's
+            // *AppliedTotalCount fields are operation TALLIES, not slot-fill counts (e.g. ItemKey 325171
+            // reports applied 4/1/0 for only 3 real enchants), so summing them over-counts sockets.
+            int sockets = g.Affixes.Count;
             if (sockets != 0) { double p = sockets * SocketWeight; s.Parts.Add(new Part("sockets", p)); s.Total += p; baseVal += p; }
             BucketBase(s, baseVal, g.GearType);
             // affixes bucket individually by their stat type

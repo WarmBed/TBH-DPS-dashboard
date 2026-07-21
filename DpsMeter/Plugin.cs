@@ -14,7 +14,7 @@ namespace TbhDpsMeter
     {
         public const string Guid = "tbh.dpsmeter";
         public const string Name = "TBH DPS Meter";
-        public const string Version = "0.9.23";
+        public const string Version = "0.9.24";
 
         public static DpsTracker Tracker;
         public static DamageTakenTracker TakenTracker;
@@ -74,6 +74,19 @@ namespace TbhDpsMeter
         public static ConfigEntry<float> FarmPanelWidth;
         public static ConfigEntry<bool> FarmStartVisible;
         private static ConfigEntry<string> _farmToggleKeyName;
+
+        // clear-time simulator panel config (hub-only, no hotkey)
+        public static ConfigEntry<float> SimPosX;
+        public static ConfigEntry<float> SimPosY;
+        public static ConfigEntry<float> SimPanelWidth;
+        public static ConfigEntry<bool> SimStartVisible;
+
+        // fitting bench panel config (hub-only, no hotkey)
+        public static ConfigEntry<float> FitPosX;
+        public static ConfigEntry<float> FitPosY;
+        public static ConfigEntry<float> FitPanelWidth;
+        public static ConfigEntry<bool> FitStartVisible;
+        public static ConfigEntry<bool> FitShowClear;
 
         // box-log panel config
         public static ConfigEntry<float> BoxPosX;
@@ -185,6 +198,17 @@ namespace TbhDpsMeter
             FarmStartVisible = Config.Bind("FarmUI", "StartVisible", false, "Show the farming-planner overlay on launch.");
             _farmToggleKeyName = Config.Bind("FarmUI", "ToggleKey", "F6", "Key to show/hide the farming-planner overlay (UnityEngine.KeyCode name).");
 
+            SimPosX = Config.Bind("SimUI", "PosX", -1f, "Clear-time simulator overlay X (auto-saved when dragged). -1 = auto.");
+            SimPosY = Config.Bind("SimUI", "PosY", -1f, "Clear-time simulator overlay Y (auto-saved when dragged). -1 = auto.");
+            SimPanelWidth = Config.Bind("SimUI", "PanelWidth", 520f, "Clear-time simulator overlay panel width in pixels.");
+            SimStartVisible = Config.Bind("SimUI", "StartVisible", false, "Show the clear-time simulator overlay on launch.");
+
+            FitPosX = Config.Bind("FitUI", "PosX", -1f, "Fitting bench overlay X (auto-saved when dragged). -1 = auto.");
+            FitPosY = Config.Bind("FitUI", "PosY", -1f, "Fitting bench overlay Y (auto-saved when dragged). -1 = auto.");
+            FitPanelWidth = Config.Bind("FitUI", "PanelWidth", 560f, "Fitting bench overlay panel width in pixels.");
+            FitShowClear = Config.Bind("FitUI", "ShowClearTime", true, "Show the clear-time prediction block at the top of the fitting bench. Click its ⏱ title to toggle.");
+            FitStartVisible = Config.Bind("FitUI", "StartVisible", false, "Show the fitting bench overlay on launch.");
+
             BoxPosX = Config.Bind("BoxUI", "PosX", -1f, "Box-log overlay X (auto-saved when dragged). -1 = auto.");
             BoxPosY = Config.Bind("BoxUI", "PosY", -1f, "Box-log overlay Y (auto-saved when dragged). -1 = auto.");
             BoxPanelWidth = Config.Bind("BoxUI", "PanelWidth", 420f, "Box-log overlay panel width in pixels.");
@@ -270,6 +294,7 @@ namespace TbhDpsMeter
                 ClassInjector.RegisterTypeInIl2Cpp<GearScoreOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<ItemStatsOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<FarmOverlayBehaviour>();
+                ClassInjector.RegisterTypeInIl2Cpp<FitOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<BoxOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<HubOverlayBehaviour>();
                 ClassInjector.RegisterTypeInIl2Cpp<BoxOpenOverlayBehaviour>();
@@ -284,6 +309,7 @@ namespace TbhDpsMeter
                 go.AddComponent<GearScoreOverlayBehaviour>();
                 go.AddComponent<ItemStatsOverlayBehaviour>();
                 go.AddComponent<FarmOverlayBehaviour>();
+                go.AddComponent<FitOverlayBehaviour>();
                 go.AddComponent<BoxOverlayBehaviour>();
                 go.AddComponent<HubOverlayBehaviour>();
                 go.AddComponent<BoxOpenOverlayBehaviour>();
