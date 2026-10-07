@@ -1046,6 +1046,23 @@ namespace TbhDpsMeter
         private static System.Reflection.MemberInfo _statBlockAccessor;  // vi   -> yu
         private static System.Reflection.MethodInfo _statGetter;         // yu.M(StatType) -> Single
 
+        /// <summary>Live modifier lists for the given StatTypes on one hero, straight from the engine's own
+        /// registry (see <see cref="LiveStats"/>). Empty when the stat chain isn't resolved yet — callers
+        /// should show "unknown" rather than a number in that case.</summary>
+        public static Dictionary<int, List<LiveStats.Mod>> ReadStatMods(Hero hero, int[] stats)
+        {
+            var outp = new Dictionary<int, List<LiveStats.Mod>>();
+            if (hero == null || stats == null) return outp;
+            try
+            {
+                var block = ResolveStatBlock(hero);
+                if (block == null) return outp;
+                foreach (int st in stats) outp[st] = LiveStats.Read(block, st);
+            }
+            catch (Exception e) { Plugin.Logger?.LogWarning("ReadStatMods: " + e.Message); }
+            return outp;
+        }
+
         public static void ReadStats(Hero hero, CharacterSnapshot snap)
         {
             try
@@ -1063,6 +1080,15 @@ namespace TbhDpsMeter
 
                 if (Plugin.DebugSnapshot != null && Plugin.DebugSnapshot.Value)
                     LogStatGetters(block);
+
+                // once per session: reconcile our re-folding of the live modifier lists against the
+                // engine's own values, so a changed aggregation surfaces as a logged MISMATCH.
+                LiveStats.Verify(block, st => { var a = EnumVal(st); return a == null ? double.NaN : InvokeGetter(block, a); });
+                // 525111 Mystic Gloves: bundled extract says Armor FLAT 446 + FLAT 344 + ADDITIVE 616.
+                // 524193 Eternal Gloves: the live modifier list says Armor FLAT 2093 (and it's a tier the
+                // bundled extract has no row for at all) — two independent checks on the game's own table.
+                GameGearDb.DumpKnown(new[] { 525111, 524193, 504193 });
+                GameGearDb.DumpAll();
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("ReadStats: " + e.Message); }
         }
