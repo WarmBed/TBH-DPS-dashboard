@@ -32,8 +32,26 @@ namespace TbhDpsMeter
             return _map;
         }
 
-        /// <summary>Localized name for an item key in the current game language; "" if unknown.</summary>
+        /// <summary>Localized name for an item key in the current game language. An ItemKey the bundled
+        /// table has never seen (a level tier the game shipped after the wiki scrape — the wiki's own
+        /// pre-release datamine already named the tier, just under a different guessed ItemKey) borrows the
+        /// name from <see cref="ItemMetaStore.FamilyBestItemKey"/>, the highest-level known sibling in the
+        /// same slot+grade family. Falls back to the live game's own item-table localizer (see
+        /// <see cref="ResolveLabel"/>) only if that also comes up empty; "" if nothing knows it.</summary>
         public static string Get(int itemKey)
+        {
+            string direct = DirectGet(itemKey);
+            if (!string.IsNullOrEmpty(direct)) return direct;
+            int bestKey = ItemMetaStore.FamilyBestItemKey(itemKey);
+            if (bestKey > 0 && bestKey != itemKey)
+            {
+                string fam = DirectGet(bestKey);
+                if (!string.IsNullOrEmpty(fam)) return fam;
+            }
+            return HeroProbe.GameLocItem(itemKey.ToString());
+        }
+
+        private static string DirectGet(int itemKey)
         {
             if (itemKey <= 0) return "";
             var names = Json.Obj(Json.Get(Map(), itemKey.ToString()));

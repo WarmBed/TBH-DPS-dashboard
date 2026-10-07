@@ -30,6 +30,14 @@ namespace TbhDpsMeter
                 return _stages;
             }
         }
+
+        /// <summary>The wiki's catalogued wave count for a stage id (e.g. "3-2 HELL"); 0 if unknown.</summary>
+        public static int Waves(string stageId)
+        {
+            if (string.IsNullOrEmpty(stageId)) return 0;
+            foreach (var s in Stages) if (s.StageId == stageId) return s.Waves;
+            return 0;
+        }
     }
 
     /// <summary>IMGUI overlay (F6): the farming-efficiency planner. Ranks every stage by gold/sec and

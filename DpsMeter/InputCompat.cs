@@ -89,6 +89,7 @@ namespace TbhDpsMeter
         private static int _seenDownSeq, _seenUpSeq;           // last hook edge counts consumed by Poll
         private static bool _f9Edge, _pgUpEdge, _pgDnEdge;
         private static bool _fg;   // game window is foreground (refreshed each Poll; gates global input)
+        private static bool _prevFg = true;   // previous frame's foreground state, for the focus-loss edge
 
         private static bool Key(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
@@ -320,6 +321,8 @@ namespace TbhDpsMeter
         }
 
         private static int _polledFrame = -1;
+        private static float _nextHeartbeat;
+
         public static void Poll()
         {
             // run at most once per frame even if several components call it
@@ -327,6 +330,19 @@ namespace TbhDpsMeter
             if (frame == _polledFrame) return;
             _polledFrame = frame;
             EnsureMouseHook();
+
+            // Unattended heartbeat (no repro steps needed): the "clicks stop landing after a while"
+            // report has no known trigger yet. ResolveGameWindow() caches _window once found and only
+            // re-resolves if IsWindow() says it's gone — if the game ever creates a SECOND UnityWndClass
+            // window (or the cached hwnd survives but stops being the rendered one) this keeps returning
+            // the wrong handle forever, and every coordinate downstream is silently off. Logging Probe()
+            // periodically means the log around the next report has the actual hwnd/scale/hook state at
+            // the moment it broke, instead of only what a workaround-triggered reset looks like.
+            if (Time.realtimeSinceStartup >= _nextHeartbeat)
+            {
+                _nextHeartbeat = Time.realtimeSinceStartup + 15f;
+                Plugin.Logger?.LogInfo("[input][heartbeat] " + Probe() + $" hookInstalled={_hookInstalled} dragOwner={_dragOwner}");
+            }
             try
             {
                 if (GetCursorPos(out var p))
@@ -352,6 +368,21 @@ namespace TbhDpsMeter
                     _hookGameHwnd = h; _scrW = Screen.width; _scrH = Screen.height;
                     UpdateHookLifecycle(h);
                 }
+
+                // The hook only processes WM_LBUTTONUP while the game is foreground (it must not
+                // swallow clicks meant for other apps). If focus leaves the game WHILE a swallowed
+                // press is still held (alt-tab, click another window, etc. without releasing first),
+                // the real button-up happens over a window the hook ignores, so it's never seen:
+                // _hookLbDown would stay stuck true forever, wedging every panel's drag state (a
+                // panel keeps re-snapping to the cursor every frame with _dragging never clearing —
+                // the ✕ button then can't be hit because the panel is still chasing the cursor).
+                // Treat a foreground-loss edge while the hook thinks the button is down as an
+                // implicit release so drag state always heals on refocus, not just when the game's
+                // own menu happens to force a reset (GameUiState.MenuOpen() already clears _dragging,
+                // which is why that "workaround" appears to fix it).
+                bool fgNow = GameIsForeground();
+                if (_hookInstalled && _hookLbDown && _prevFg && !fgNow) { _hookLbDown = false; _hookUpSeq++; }
+                _prevFg = fgNow;
 
                 if (_hookInstalled)
                 {
@@ -383,7 +414,7 @@ namespace TbhDpsMeter
                 // never sees them — Windows only routes WM_* messages to the focused window). Track the
                 // prev-states above as usual (so no stale edge fires on refocus) but suppress all edge
                 // outputs while another window has focus. Held-state (_down) is kept for drag release.
-                _fg = GameIsForeground();
+                _fg = fgNow;
                 if (!_fg)
                 {
                     _pressed = false; _mbPressed = false;
@@ -411,6 +442,26 @@ namespace TbhDpsMeter
 
         private static IntPtr ResolveGameWindow()
         {
+            // This game runs more than one UnityWndClass window (it stays docked near the taskbar — a
+            // heartbeat diag caught foreground=0x221DD2 class=UnityWndClass samePID while the cached
+            // handle was a DIFFERENT (or unset) one). EnumWindows' enumeration order isn't guaranteed to
+            // land on whichever one is actually interactive, so latching onto "the first one ever found"
+            // (the old behavior below) can silently pin every coordinate/foreground check to the wrong
+            // window for the rest of the session — every panel goes unclickable with no way to self-heal.
+            // Preferring "whichever OS foreground window belongs to this process" on every call instead of
+            // trusting a permanent cache means it re-syncs to whichever window is actually current each frame.
+            IntPtr fg = GetForegroundWindow();
+            if (fg != IntPtr.Zero)
+            {
+                GetWindowThreadProcessId(fg, out uint fgPid);
+                if (fgPid == (uint)Process.GetCurrentProcess().Id)
+                {
+                    _window = fg;
+                    _windowSource = "foreground/pid";
+                    return _window;
+                }
+            }
+
             if (_window != IntPtr.Zero && IsWindow(_window))
             {
                 return _window;
@@ -516,6 +567,19 @@ namespace TbhDpsMeter
         }
 
         public static string Probe()
-            => $"cursorGui={_pos} raw=({_rawX},{_rawY}) hwnd=0x{_window.ToInt64():X} source={_windowSource} client={_cw}x{_ch} screen={Screen.width}x{Screen.height} scale=({_sx:0.###},{_sy:0.###}) down={_down}";
+        {
+            IntPtr fg = GetForegroundWindow();
+            string fgInfo;
+            if (fg == _window) fgInfo = "SAME";
+            else
+            {
+                var cls = new StringBuilder(64);
+                GetClassName(fg, cls, cls.Capacity);
+                GetWindowThreadProcessId(fg, out uint fgPid);
+                uint myPid = (uint)Process.GetCurrentProcess().Id;
+                fgInfo = $"0x{fg.ToInt64():X} class={cls} {(fgPid == myPid ? "samePID" : "otherPID=" + fgPid)}";
+            }
+            return $"cursorGui={_pos} raw=({_rawX},{_rawY}) hwnd=0x{_window.ToInt64():X} source={_windowSource} client={_cw}x{_ch} screen={Screen.width}x{Screen.height} scale=({_sx:0.###},{_sy:0.###}) down={_down} foreground={fgInfo}";
+        }
     }
 }

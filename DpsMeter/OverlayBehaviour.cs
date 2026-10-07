@@ -348,6 +348,14 @@ namespace TbhDpsMeter
             {
                 var s = Plugin.Tracker.GetSnapshot(endTime);
                 if (s.Hits <= 0 || s.Total <= 0) return;
+                // Discard a run abandoned mid-clear (switched stages before finishing) rather than
+                // recording its partial elapsed time as if it were a real clear — that fake-fast clear
+                // then pollutes F11's baseline and F6's per-stage calibration. Only checked when the wiki
+                // knows the stage's real wave count; a -1 tolerance absorbs the final-wave counting quirk
+                // (a genuine clear can end one MONSTERSPAWN short of the catalogued total — see the
+                // NONE/REORGANIZATION handling above) without letting a truly-abandoned run through.
+                int expectedWaves = FarmDataStore.Waves(_runStageId);
+                if (expectedWaves > 0 && _currentWave < expectedWaves - 1) return;
                 var r = new RunRecord
                 {
                     Title = DateTime.Now.ToString("MM/dd HH:mm:ss"),
