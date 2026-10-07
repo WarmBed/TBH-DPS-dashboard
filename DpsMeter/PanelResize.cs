@@ -69,7 +69,13 @@ namespace TbhDpsMeter
                     width = Mathf.Clamp(_startW + (m.x - _start.x), minW, maxW);
                     if (heightEnabled) height = Mathf.Clamp(_startH + (m.y - _start.y), minH, maxH);
                 }
-                if (InputCompat.MouseReleased()) { _active = false; InputCompat.ReleaseDrag(slot); return Result.Committed; }
+                // Level-triggered release, not just the edge: if the mouse-up is ever missed (focus lost
+                // mid-drag, release outside the window) the edge never fires and _active latches — and since
+                // any non-None result makes callers early-out, that silently swallows EVERY later click on
+                // the panel, including its close button. Treating "button simply isn't down any more" as a
+                // release makes it self-heal; it can't misfire because a real drag holds the button down.
+                if (InputCompat.MouseReleased() || !InputCompat.MouseHeld())
+                { _active = false; InputCompat.ReleaseDrag(slot); return Result.Committed; }
                 return Result.Resizing;
             }
             return Result.None;

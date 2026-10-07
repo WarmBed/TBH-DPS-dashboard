@@ -72,6 +72,11 @@ namespace TbhDpsMeter
         // hero -> live computed character stats (short key -> value) from the newest run; the bench anchors
         // its displayed stats to these so the current config matches the game's 屬性 panel exactly.
         private readonly Dictionary<int, Dictionary<string, double>> _liveStats = new Dictionary<int, Dictionary<string, double>>();
+        // per-hero LIVE modifier lists (stat -> mods) straight from the engine: the exact baseline the
+        // sandbox deltas fold onto. Missing for a hero whose stat chain isn't live yet -> rows are skipped.
+        private readonly Dictionary<int, Dictionary<int, List<LiveStats.Mod>>> _baseMods = new Dictionary<int, Dictionary<int, List<LiveStats.Mod>>>();
+        private static readonly int[] SimStatTypes = { LiveStats.StatAttackDamage, LiveStats.StatAttackSpeed,
+            LiveStats.StatCritChance, LiveStats.StatCritDamage, LiveStats.StatMaxHp, LiveStats.StatArmor };
         // hero -> slot -> material key per socket (deco sockets first, then engraving, then inscription)
         private readonly Dictionary<int, Dictionary<int, int[]>> _sockets = new Dictionary<int, Dictionary<int, int[]>>();
         private int _focus = 0;          // gear slot whose sockets are shown in the bench
@@ -90,6 +95,13 @@ namespace TbhDpsMeter
         private readonly List<Rect> _fitDelRects = new List<Rect>();    // per saved-fit "delete" hitboxes
         private readonly List<int> _fitIdx = new List<int>();           // parallel: store index per shown row
         private readonly List<RunRecord> _clearStages = new List<RunRecord>();   // latest run per farmed stage (built on Reload), for the live clear-time block
+        // Hero tab: -1 = all heroes side by side (the old layout), otherwise the heroKey shown alone.
+        // Three columns plus the picker leaves each hero ~282px, which is why everything had to be
+        // squeezed into tiny two-per-row stats; one hero at a time gets the full panel width instead.
+        private int _heroTab = -1;
+        private readonly List<Rect> _heroTabRects = new List<Rect>();
+        private readonly List<int> _heroTabIds = new List<int>();
+
         private readonly HashSet<int> _partyHeroes = new HashSet<int>();          // heroKeys that fought in the newest run (the current party — no save field for it)
         // cached iterative clear-time sim (recomputed only when the sandbox streams change — WaveSim is heavy)
         private readonly List<string> _simStage = new List<string>();
@@ -180,6 +192,19 @@ namespace TbhDpsMeter
             // (and any in-progress edits) instead of blanking the bench.
             if ((party == null || party.Count == 0) && _heroes.Count > 0) return;
             _heroes.Clear(); _orig.Clear(); _load.Clear(); _measDps.Clear(); _sockets.Clear(); RealSockets.Clear(); _liveStats.Clear();
+            _baseMods.Clear();
+            try
+            {
+                foreach (var lh in HeroProbe.FindParty())
+                {
+                    if (lh == null) continue;
+                    int hk = HeroProbe.ReadHeroKey(lh);
+                    if (hk <= 0 || _baseMods.ContainsKey(hk)) continue;
+                    var lm = HeroProbe.ReadStatMods(lh, SimStatTypes);
+                    if (lm.Count > 0) _baseMods[hk] = lm;
+                }
+            }
+            catch { }
             // current equipped gear per hero (ItemKey by slot0..slot9) + the item's REAL applied sockets
             try
             {
@@ -326,7 +351,8 @@ namespace TbhDpsMeter
         private void HandlePointer()
         {
             if (GameUiState.MenuOpen()) { if (_dragging) { _dragging = false; InputCompat.ReleaseDrag(Slot); } return; }
-            Vector2 m = UiScale.ToLocal(InputCompat.MouseGuiPos(), _rect.x, _rect.y, _scale);
+            Vector2 ms = InputCompat.MouseGuiPos();                                 // raw GUI/screen space (for drag)
+            Vector2 m = UiScale.ToLocal(ms, _rect.x, _rect.y, _scale);                  // unscaled local space (for hit-tests)
             {
                 // resize the BASE panel width (the always-on picker keeps its fixed width on the right)
                 float rw = _rect.width - PickerW, dh = 0f;
@@ -369,6 +395,13 @@ namespace TbhDpsMeter
                     for (int i = 0; i < _pickRects.Count && i < _pickKeys.Count; i++)
                         if (_pickRects[i].Contains(m)) { SetSlot(_focus, _pickKeys[i]); return; }   // keep list open after a swap
                 }
+                for (int i = 0; i < _heroTabRects.Count && i < _heroTabIds.Count; i++)
+                    if (_heroTabRects[i].Contains(m))
+                    {
+                        _heroTab = _heroTabIds[i];
+                        if (_heroTab >= 0) _heroIdx = _heroes.IndexOf(_heroTab);   // focus the hero being shown
+                        return;
+                    }
                 if (_resetRect.Contains(m)) { ResetLoadout(); return; }
                 if (_optRect.Contains(m)) { OptimizeAllSockets(); return; }
                 if (_optLog.Count > 0 && _optLogClose.Contains(m)) { _optLog.Clear(); return; }
@@ -380,12 +413,15 @@ namespace TbhDpsMeter
                     if (_focusRects[i].Contains(m)) { FocusColumn(_colHero[i], _colSlot[i]); return; }
                 for (int i = 0; i < _sockRects.Count && i < _sockPosList.Count; i++)
                     if (_sockRects[i].Contains(m)) { FocusColumn(_sockHeroList[i], _sockSlotList[i]); OpenSockPicker(_sockSlotList[i], _sockPosList[i]); return; }
-                if (_rect.Contains(m) && InputCompat.ClaimDrag(Slot)) { _dragging = true; _dragOffset = m - new Vector2(_rect.x, _rect.y); }
+                // drag delta tracked in SCREEN space: the panel always renders at (_rect.x,_rect.y) whatever
+                // _scale is, so feeding the scaled local point back into _rect diverges once _scale drops
+                // (the same "panel jumps away from the cursor" bug already fixed in the gear-score panel).
+                if (_rect.Contains(m) && InputCompat.ClaimDrag(Slot)) { _dragging = true; _dragOffset = ms - new Vector2(_rect.x, _rect.y); }
             }
             if (_dragging)
             {
                 if (!InputCompat.OwnsDrag(Slot)) { _dragging = false; return; }
-                if (InputCompat.MouseHeld()) { _rect.x = m.x - _dragOffset.x; _rect.y = m.y - _dragOffset.y; UiScale.ClampToScreen(ref _rect, _scale); }
+                if (InputCompat.MouseHeld()) { _rect.x = ms.x - _dragOffset.x; _rect.y = ms.y - _dragOffset.y; UiScale.ClampToScreen(ref _rect, _scale); }
                 if (InputCompat.MouseReleased()) { _dragging = false; _wantX = _rect.x; _wantY = _rect.y; Plugin.FitPosX.Value = _rect.x; Plugin.FitPosY.Value = _rect.y; }
             }
         }
@@ -500,6 +536,72 @@ namespace TbhDpsMeter
             return g != null && !string.IsNullOrEmpty(g.NameKey) ? g.NameKey : ("#" + itemKey);
         }
         private static string FmtNum(double v) { double a = Math.Abs(v); if (a >= 1e6) return (v / 1e6).ToString("0.#") + "M"; if (a >= 1e3) return (v / 1e3).ToString("0.#") + "K"; return v.ToString("0.#"); }
+        private static double SimNow(Dictionary<int, List<LiveStats.Mod>> baseMods, int stat)
+            => baseMods.TryGetValue(stat, out var l) ? LiveStats.Compute(l) : 0;
+
+        private static double SimNew(Dictionary<int, List<LiveStats.Mod>> baseMods, Dictionary<int, List<LiveStats.Mod>> delta, int stat)
+        {
+            if (!baseMods.TryGetValue(stat, out var l)) return 0;
+            var merged = new List<LiveStats.Mod>(l);
+            if (delta != null && delta.TryGetValue(stat, out var d)) merged.AddRange(d);
+            return LiveStats.Compute(merged);
+        }
+
+        // StatType int for a gear/socket stat name; 0 = not one of the stats we predict.
+        private static int SimStatId(string stat)
+        {
+            switch (stat)
+            {
+                case "Armor": return LiveStats.StatArmor;
+                case "MaxHp": return LiveStats.StatMaxHp;
+                case "AttackDamage": return LiveStats.StatAttackDamage;
+                case "AttackSpeed": return LiveStats.StatAttackSpeed;
+                case "CriticalChance": return LiveStats.StatCritChance;
+                case "CriticalDamage": return LiveStats.StatCritDamage;
+            }
+            return 0;
+        }
+
+        private static void AddDelta(Dictionary<int, List<LiveStats.Mod>> d, string stat, string mod, double value, int sign)
+        {
+            int id = SimStatId(stat);
+            if (id == 0) return;
+            List<LiveStats.Mod> l;
+            if (!d.TryGetValue(id, out l)) { l = new List<LiveStats.Mod>(); d[id] = l; }
+            l.Add(LiveStats.FromGearStat(mod, value, sign));
+        }
+
+        /// <summary>The sandbox's stat changes vs what's really equipped, as +/- modifiers per stat: socket
+        /// cells added/removed, and for a swapped slot the whole item's template lines both ways.
+        /// <paramref name="complete"/> goes false when a swapped item isn't in the bundled gear DB (the new
+        /// Lv90 tier isn't) - its contribution can't be modelled, so the caller flags the column rather than
+        /// quietly showing a number that's missing that item.</summary>
+        private Dictionary<int, List<LiveStats.Mod>> SimDelta(int[] origArr, int[] gearArr,
+            Dictionary<int, List<GearStat>> origLines, Dictionary<int, List<GearStat>> sbLines, out bool complete)
+        {
+            var d = new Dictionary<int, List<LiveStats.Mod>>();
+            complete = true;
+            for (int s = 0; s < SlotParts.Length; s++)
+            {
+                int ok = (origArr != null && s < origArr.Length) ? origArr[s] : 0;
+                int nk = (gearArr != null && s < gearArr.Length) ? gearArr[s] : 0;
+                if (ok != nk)
+                {
+                    var og = GearDatabase.ByKey(ok); var ng = GearDatabase.ByKey(nk);
+                    if ((ok != 0 && og == null) || (nk != 0 && ng == null)) { complete = false; }
+                    else
+                    {
+                        if (og != null) foreach (var st in og.Stats) AddDelta(d, st.Stat, st.Mod, st.Value, -1);
+                        if (ng != null) foreach (var st in ng.Stats) AddDelta(d, st.Stat, st.Mod, st.Value, +1);
+                    }
+                }
+                List<GearStat> ol, nl;
+                if (origLines != null && origLines.TryGetValue(s, out ol)) foreach (var c in ol) AddDelta(d, c.Stat, c.Mod, c.Value, -1);
+                if (sbLines != null && sbLines.TryGetValue(s, out nl)) foreach (var c in nl) AddDelta(d, c.Stat, c.Mod, c.Value, +1);
+            }
+            return d;
+        }
+
         private static double Sv(Dictionary<string, double> agg, string k) { double v = 0; if (agg != null) agg.TryGetValue(k, out v); return v; }
         // anchor a live character stat to the gear-aggregate ratio: unchanged gear -> the live value (matches
         // the game's 屬性 panel); edits scale it proportionally (additive when gear contributes 0 to that stat).
@@ -548,6 +650,9 @@ namespace TbhDpsMeter
                 var colHeroes = new List<int>();
                 foreach (var hc in _heroes) if (_partyHeroes.Contains(hc)) colHeroes.Add(hc);
                 if (colHeroes.Count == 0) colHeroes.AddRange(_heroes);
+                var tabHeroes = new List<int>(colHeroes);           // every hero that has a tab
+                if (_heroTab >= 0 && colHeroes.Contains(_heroTab)) { colHeroes.Clear(); colHeroes.Add(_heroTab); }
+                else _heroTab = -1;
                 int colN = Mathf.Max(1, colHeroes.Count);
                 if (_heroes.Count > 0 && !colHeroes.Contains(CurHero)) _heroIdx = _heroes.IndexOf(colHeroes[0]);   // focus a visible column
                 // main column + always-on item/material side-column to the RIGHT (expand, don't replace the page)
@@ -571,7 +676,7 @@ namespace TbhDpsMeter
                     int nw = _clearStages[_simExpand].WaveDurations != null ? _clearStages[_simExpand].WaveDurations.Count : 0;
                     if (nw > 0) clearRows += (int)System.Math.Ceiling(nw / (double)PerWaveCols(baseW - Pad * 2)) + 2;
                 }
-                int mainRows = clearRows + 6 + maxSlotRows;   // clear-time + (header+dps+4 stat-rows) + gear+chip-sockets
+                int mainRows = clearRows + 10 + maxSlotRows;  // clear-time + tabs + (header+dps+3 predicted+4 stat-rows) + gear+chip-sockets
                 int rows = sideOpen ? Mathf.Max(mainRows, 20) : mainRows;
                 float bodyH = lh * (rows + 2);
                 _rect.height = Pad + bodyH + Pad;
@@ -598,6 +703,16 @@ namespace TbhDpsMeter
                 {
                     GUI.Label(new Rect(ix, cy, iw, lh), $"<color=#8a93a0>{Loc.G("fit_need")}</color>", _label);
                     _resize.DrawGrip(_white, _rect); return;
+                }
+
+                // hero tabs (全部 + one per hero) — same interaction as the gear-score panel's class tabs
+                _heroTabRects.Clear(); _heroTabIds.Clear();
+                if (tabHeroes.Count > 1)
+                {
+                    float tx = ix;
+                    DrawHeroTab(ref tx, cy, lh, -1, Loc.G("gearscore_all"));
+                    foreach (int th in tabHeroes) DrawHeroTab(ref tx, cy, lh, th, HeroProbe.HeroName(th));
+                    cy += lh + 2;
                 }
 
                 int hero = CurHero;
@@ -1278,6 +1393,18 @@ namespace TbhDpsMeter
 
         // one hero's column: header (★ name + DPS×ratio) + compact stats + the 10 gear slots (click to focus).
         // Sets the _fp* fields for this hero so its stat values reflect its own edits. Returns the column bottom.
+        private void DrawHeroTab(ref float tx, float cy, float lh, int id, string label)
+        {
+            bool sel = _heroTab == id;
+            float bw = Mathf.Max(52f, _btn.CalcSize(new GUIContent(label)).x + 14f);
+            var r = new Rect(tx, cy, bw, lh);
+            DrawRect(tx, cy, bw, lh, sel ? new Color(0.30f, 0.45f, 0.75f, 0.45f) : new Color(1, 1, 1, 0.06f));
+            if (id >= 0) DrawRect(tx, cy, 3, lh, ClassColor(id));
+            GUI.Label(new Rect(tx + (id >= 0 ? 7 : 5), cy, bw, lh), sel ? $"<b><color=#ffd86b>{label}</color></b>" : label, _label);
+            _heroTabRects.Add(r); _heroTabIds.Add(id);
+            tx += bw + 3f;
+        }
+
         private float DrawHeroColumn(float cx, float top, float colW, float lh, int hero, bool focused, double ratioH)
         {
             float cy = top, iw = colW;
@@ -1310,6 +1437,33 @@ namespace TbhDpsMeter
             double dpsH = (_measDps.TryGetValue(hero, out var mh) && mh > 0) ? mh * ratioH : 0;
             string rcH = ratioH > 1.001 ? "#7fffa0" : (ratioH < 0.999 ? "#ff8a8a" : "#9aa3b0");
             GUI.Label(new Rect(cx + 8, cy, iw - 8, lh), $"<size=11><color=#9fb4cc>{Loc.G("fit_dps")}</color> <b>{FmtNum(dpsH)}</b> <color={rcH}>×{ratioH:0.00}</color></size>", _label); cy += lh;
+
+            // exact predicted stats: the engine's own live modifier list with this column's sandbox edits
+            // folded in as +/- modifiers (the fold is a plain sum, so a delta list is equivalent to editing
+            // the real list). Reconciled against the engine每 session - see LiveStats.Verify.
+            float shw = iw * 0.5f;
+            if (_baseMods.TryGetValue(hero, out var bmods))
+            {
+                bool complete;
+                var delta = SimDelta(origArr, gearArr, origLines, sbLines, out complete);
+                double cArmor = SimNow(bmods, LiveStats.StatArmor), nArmor = SimNew(bmods, delta, LiveStats.StatArmor);
+                double cHp = SimNow(bmods, LiveStats.StatMaxHp), nHp = SimNew(bmods, delta, LiveStats.StatMaxHp);
+                double cAtk = SimNow(bmods, LiveStats.StatAttackDamage), nAtk = SimNew(bmods, delta, LiveStats.StatAttackDamage);
+                double cAsp = SimNow(bmods, LiveStats.StatAttackSpeed), nAsp = SimNew(bmods, delta, LiveStats.StatAttackSpeed);
+                double cCc = SimNow(bmods, LiveStats.StatCritChance), nCc = SimNew(bmods, delta, LiveStats.StatCritChance);
+                double cCd = SimNow(bmods, LiveStats.StatCritDamage), nCd = SimNew(bmods, delta, LiveStats.StatCritDamage);
+                double cDps = cAtk * cAsp * DamageFormula.CritMultiplier(cCc, cCd);
+                double nDps = nAtk * nAsp * DamageFormula.CritMultiplier(nCc, nCd);
+                ColStatAt(cx, cy, shw, lh, Loc.G("armor"), cArmor, nArmor, "0", "");
+                ColStatAt(cx + shw, cy, shw, lh, Loc.G("hp"), cHp, nHp, "0", ""); cy += lh;
+                ColStatAt(cx, cy, shw, lh, Loc.G("attack"), cAtk, nAtk, "0", "");
+                ColStatAt(cx + shw, cy, shw, lh, Loc.G("aspd"), cAsp, nAsp, "0.##", ""); cy += lh;
+                ColStatAt(cx, cy, shw, lh, Loc.G("fit_basicdps"), cDps, nDps, "0", "");
+                if (!complete)
+                    GUI.Label(new Rect(cx + shw, cy, shw, lh), "<size=10><color=#e0a843>" + Loc.G("fit_simpartial") + "</color></size>", _label);
+                cy += lh;
+                DrawRect(cx, cy, iw, 1, new Color(1, 1, 1, 0.10f)); cy += 3;
+            }
 
             // compact stats — 2 per row (4 rows) so the column stays short; coloured vs the live/original value
             float hw = iw * 0.5f;

@@ -206,7 +206,7 @@ namespace TbhDpsMeter
             FitPosX = Config.Bind("FitUI", "PosX", -1f, "Fitting bench overlay X (auto-saved when dragged). -1 = auto.");
             FitPosY = Config.Bind("FitUI", "PosY", -1f, "Fitting bench overlay Y (auto-saved when dragged). -1 = auto.");
             FitPanelWidth = Config.Bind("FitUI", "PanelWidth", 560f, "Fitting bench overlay panel width in pixels.");
-            FitShowClear = Config.Bind("FitUI", "ShowClearTime", true, "Show the clear-time prediction block at the top of the fitting bench. Click its ⏱ title to toggle.");
+            FitShowClear = Config.Bind("FitUI", "ShowClearTime", false, "Show the clear-time prediction block at the top of the fitting bench. Click its ⏱ title to toggle.");
             FitStartVisible = Config.Bind("FitUI", "StartVisible", false, "Show the fitting bench overlay on launch.");
 
             BoxPosX = Config.Bind("BoxUI", "PosX", -1f, "Box-log overlay X (auto-saved when dragged). -1 = auto.");

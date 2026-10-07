@@ -172,6 +172,8 @@ namespace TbhDpsMeter
             { "level",          new[] { "等級", "Level", "レベル", "等级", "Nivel" } },
             { "by_character",   new[] { "按角色", "By character", "キャラ別", "按角色", "Por personaje" } },
             { "sockets",        new[] { "鑲嵌槽", "Sockets", "ソケット", "镶嵌槽", "Engastes" } },
+            { "fit_basicdps",   new[] { "普攻DPS", "Basic DPS", "通常攻撃DPS", "普攻DPS", "DPS básico" } },
+            { "fit_simpartial", new[] { "部分未計入", "partial", "一部未計算", "部分未计入", "parcial" } },
             // item-stats panel (F8)
             { "items_title",    new[] { "物品統計", "Items", "アイテム集計", "物品统计", "Objetos" } },
             { "items_empty",    new[] { "倉庫與背包是空的", "Bag and stash are empty", "アイテムなし", "仓库与背包是空的", "Sin objetos" } },
