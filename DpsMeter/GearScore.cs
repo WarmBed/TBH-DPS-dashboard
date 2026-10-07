@@ -88,7 +88,11 @@ namespace TbhDpsMeter
         private static readonly HashSet<string> AccGear = new HashSet<string>
         { "AMULET", "EARING", "EARRING", "RING", "BRACER" };
 
-        public static ItemScore ScoreItem(GearItem g)
+        /// <summary>Scores one item. With <paramref name="ignoreSockets"/>, the score is grade+level only —
+        /// the item's raw quality/potential — skipping the filled-socket bonus and every affix/gem value, so
+        /// a freshly-dropped unenchanted item can be compared against a heavily-enchanted one on the same
+        /// footing (otherwise enchant investment dominates the score and drowns out the base item itself).</summary>
+        public static ItemScore ScoreItem(GearItem g, bool ignoreSockets = false)
         {
             var s = new ItemScore();
             if (g == null) return s;
@@ -99,16 +103,22 @@ namespace TbhDpsMeter
             s.Parts.Add(new Part("grade", gb)); s.Total += gb; baseVal += gb;
             double lv = g.Level * LevelWeight;
             if (lv != 0) { s.Parts.Add(new Part("level", lv)); s.Total += lv; baseVal += lv; }
-            // FILLED sockets = the non-empty EnchantData enchants (g.Affixes). The save's
-            // *AppliedTotalCount fields are operation TALLIES, not slot-fill counts (e.g. ItemKey 325171
-            // reports applied 4/1/0 for only 3 real enchants), so summing them over-counts sockets.
-            int sockets = g.Affixes.Count;
-            if (sockets != 0) { double p = sockets * SocketWeight; s.Parts.Add(new Part("sockets", p)); s.Total += p; baseVal += p; }
+            if (!ignoreSockets)
+            {
+                // FILLED sockets = the non-empty EnchantData enchants (g.Affixes). The save's
+                // *AppliedTotalCount fields are operation TALLIES, not slot-fill counts (e.g. ItemKey 325171
+                // reports applied 4/1/0 for only 3 real enchants), so summing them over-counts sockets.
+                int sockets = g.Affixes.Count;
+                if (sockets != 0) { double p = sockets * SocketWeight; s.Parts.Add(new Part("sockets", p)); s.Total += p; baseVal += p; }
+            }
             BucketBase(s, baseVal, g.GearType);
-            // affixes bucket individually by their stat type
-            foreach (var a in g.Affixes) Add(s, a.Name, a.Value * WeightOf(a.Name), a.Name);
-            // live per-gem socket stats (rare); usually empty — socket value comes from the counts above.
-            foreach (var a in g.Sockets) Add(s, "socket:" + a.Name, a.Value * WeightOf(a.Name), a.Name);
+            if (!ignoreSockets)
+            {
+                // affixes bucket individually by their stat type
+                foreach (var a in g.Affixes) Add(s, a.Name, a.Value * WeightOf(a.Name), a.Name);
+                // live per-gem socket stats (rare); usually empty — socket value comes from the counts above.
+                foreach (var a in g.Sockets) Add(s, "socket:" + a.Name, a.Value * WeightOf(a.Name), a.Name);
+            }
             return s;
         }
 
@@ -132,13 +142,13 @@ namespace TbhDpsMeter
         /// <summary>Whole-character roll-up: total, plus offence/defence split (affix-based).</summary>
         public struct CharScore { public double Total, Attack, Defense; }
 
-        public static CharScore ScoreCharacter(CharacterSnapshot snap)
+        public static CharScore ScoreCharacter(CharacterSnapshot snap, bool ignoreSockets = false)
         {
             var cs = new CharScore();
             if (snap == null) return cs;
             foreach (var g in snap.Equipment)
             {
-                var s = ScoreItem(g);
+                var s = ScoreItem(g, ignoreSockets);
                 cs.Total += s.Total; cs.Attack += s.Attack; cs.Defense += s.Defense;
             }
             return cs;

@@ -83,9 +83,29 @@ namespace TbhDpsMeter
             return key;   // not resolved yet — don't cache, retry next frame
         }
 
-        /// <summary>English (en-US) name for an item key; "" if unknown. Steam market hash_names are in
-        /// English, so this is what we match against PriceStore.</summary>
+        /// <summary>Every ItemKey the bundled table knows, for callers that need to build a reverse
+        /// (name -> something) lookup — e.g. classifying a box-open log entry, which only carries a
+        /// display name, back to its item category.</summary>
+        public static IEnumerable<int> AllKeys()
+        {
+            foreach (var k in Map().Keys)
+                if (int.TryParse(k, out int id)) yield return id;
+        }
+
+        /// <summary>English (en-US) name for an item key; falls back to the family's highest-level known
+        /// sibling (see <see cref="Get"/>/<see cref="ItemMetaStore.FamilyBestItemKey"/>) if this exact
+        /// ItemKey is unknown — a Steam market hash_name still needs the English name even for a tier the
+        /// wiki mis-numbered, or price lookups for it silently miss (e.g. a blank name flattens to hash
+        /// " (Rare) A", which never matches). "" if the whole family is unknown.</summary>
         public static string GetEn(int itemKey)
+        {
+            string en = DirectGetEn(itemKey);
+            if (!string.IsNullOrEmpty(en)) return en;
+            int bestKey = ItemMetaStore.FamilyBestItemKey(itemKey);
+            return bestKey > 0 && bestKey != itemKey ? DirectGetEn(bestKey) : "";
+        }
+
+        private static string DirectGetEn(int itemKey)
         {
             if (itemKey <= 0) return "";
             var names = Json.Obj(Json.Get(Map(), itemKey.ToString()));

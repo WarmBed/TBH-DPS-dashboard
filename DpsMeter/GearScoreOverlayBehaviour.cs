@@ -17,6 +17,7 @@ namespace TbhDpsMeter
         private Rect _rect = new Rect(60, 60, 360, 0);
         private bool _visible;
         private bool _detailed;               // 詳細/簡易 toggle
+        private bool _ignoreSockets;          // 無視插槽 toggle — score grade+level only, no enchant value
         private float _opacity = 0.9f;
         private bool _placed;
         private float _wantX, _wantY, _scale = 1f;
@@ -26,7 +27,7 @@ namespace TbhDpsMeter
         private Texture2D _white, _bgTex;
         private GUIStyle _title, _label, _dim, _tiny, _btn, _box; private bool _stylesReady;
         private int _builtFs = -1, _builtFsm = -1;
-        private Rect _closeRect, _modeRect;
+        private Rect _closeRect, _modeRect, _socketsRect;
         private readonly PanelResize _resize = new PanelResize();
         private Rect ScaledRect() => new Rect(_rect.x, _rect.y, _rect.width * _scale, _rect.height * _scale);
 
@@ -114,6 +115,7 @@ namespace TbhDpsMeter
             {
                 if (_closeRect.Contains(m)) { _visible = false; return; }
                 if (_modeRect.Contains(m)) { _detailed = !_detailed; _scrollY = 0f; return; }
+                if (_socketsRect.Contains(m)) { _ignoreSockets = !_ignoreSockets; _scrollY = 0f; return; }
                 for (int t = 0; t < _tabRects.Count; t++)
                     if (_tabRects[t].Contains(m)) { _classFilter = _tabIds[t]; _scrollY = 0f; return; }
                 // drag delta is in SCREEN space: the panel's top-left always renders at (_rect.x,_rect.y)
@@ -190,7 +192,7 @@ namespace TbhDpsMeter
                     var eq = snap.Equipment;
                     for (int j = 0; j < eq.Count; j++)
                     {
-                        var sc = GearScore.ScoreItem(eq[j]);
+                        var sc = GearScore.ScoreItem(eq[j], _ignoreSockets);
                         _lines.Add(new Line { K = LK.Item, H = rowH, Snap = i, Item = j, Score = sc }); contentH += rowH;
                         if (_detailed)
                             for (int p = 0; p < sc.Parts.Count; p++)
@@ -215,9 +217,11 @@ namespace TbhDpsMeter
                 GUI.matrix = UiScale.Matrix(_rect.x, _rect.y, _scale);
                 GUI.Box(_rect, GUIContent.none, _box); PanelBorder.Draw(_rect);
 
-                // ---- header row: title + 詳細/簡易 + close ----
+                // ---- header row: title + 無視插槽 + 詳細/簡易 + close ----
                 float cy = _rect.y + Pad;
-                GUI.Label(new Rect(ix, cy, iw - 130, lh), Loc.G("gearscore_title"), _title);
+                GUI.Label(new Rect(ix, cy, iw - 232, lh), Loc.G("gearscore_title"), _title);
+                _socketsRect = new Rect(x + w - 222, cy - 1, 100, lh);
+                GUI.Button(_socketsRect, Loc.G(_ignoreSockets ? "score_nosockets" : "score_withsockets"), _btn);
                 _modeRect = new Rect(x + w - 116, cy - 1, 86, lh);
                 GUI.Button(_modeRect, Loc.G(_detailed ? "mode_detailed" : "mode_simple"), _btn);
                 _closeRect = new Rect(x + w - 26, cy - 2, 22, lh);
@@ -300,7 +304,7 @@ namespace TbhDpsMeter
             if (ln.K == LK.Char)
             {
                 var snap = _party[ln.Snap];
-                var cs = GearScore.ScoreCharacter(snap);
+                var cs = GearScore.ScoreCharacter(snap, _ignoreSockets);
                 string nm = string.IsNullOrEmpty(snap.CharacterName) ? snap.Character : snap.CharacterName;
                 DrawRect(ix, ry + lh * 0.34f, 8f, 8f, ClassColor(ClassOf(snap)));
                 GUI.Label(new Rect(ix + 13, ry, iw - 13, lh),

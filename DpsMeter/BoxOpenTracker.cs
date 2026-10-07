@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 
@@ -131,6 +132,29 @@ namespace TbhDpsMeter
 
         private static int _diagCount;
 
+        // Lazily built name -> broad category ("GEAR"/"MATERIAL"/"STAGEBOX") reverse lookup. BoxOpenLog
+        // carries only a display name (no ItemKey — see BoxOpenLog's fields above), so a captured drop is
+        // classified by looking that name up against the bundled table instead. Names aren't unique per
+        // ItemKey, but every ItemKey sharing a display name shares its category too (e.g. "暗影之弓" is
+        // always a bow, never a material), so first-match-wins is safe.
+        private static Dictionary<string, string> _nameToCategory;
+
+        private static string CategoryForName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return "";
+            if (_nameToCategory == null)
+            {
+                _nameToCategory = new Dictionary<string, string>();
+                foreach (int id in ItemNameStore.AllKeys())
+                {
+                    string nm = ItemNameStore.Get(id);
+                    if (string.IsNullOrEmpty(nm) || _nameToCategory.ContainsKey(nm)) continue;
+                    _nameToCategory[nm] = ItemMetaStore.Category(id);
+                }
+            }
+            return _nameToCategory.TryGetValue(name, out string c) ? c : "";
+        }
+
         // Fires for every log added. We only care about BoxOpenLog entries (one per opened item).
         private static void AddLogPostfix(TaskbarHero.Log.LogData __0)
         {
@@ -161,6 +185,11 @@ namespace TbhDpsMeter
                     if (dm.Success && int.TryParse(dm.Value, out int ik))
                     { string loc = ItemNameStore.Get(ik); if (!string.IsNullOrEmpty(loc)) name = loc; }
                 }
+                // Exclude materials (crafting reagents, soul stones — CategoryForName("靈魂石 - 地獄") ==
+                // "MATERIAL") from box-open stats: they carry real EGradeType values same as gear, so left
+                // in they read as "rare pulls" in the grade×kind matrix when they're just reagents.
+                if (CategoryForName(name) == "MATERIAL") return;
+
                 string stage = ""; try { stage = CharacterReader.CurrentStageId(); } catch { }
 
                 Stats.Add(new BoxOpenEvent { Time = DateTime.Now, Grade = grade, Kind = _openingKind, Name = name, Stage = stage });

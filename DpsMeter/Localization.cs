@@ -166,6 +166,8 @@ namespace TbhDpsMeter
             { "gearscore_all",  new[] { "全部", "All", "すべて", "全部", "Todos" } },
             { "mode_simple",    new[] { "簡易", "Simple", "簡易", "简易", "Simple" } },
             { "mode_detailed",  new[] { "詳細", "Detailed", "詳細", "详细", "Detalle" } },
+            { "score_withsockets", new[] { "含插槽", "With Sockets", "含ソケット", "含插槽", "Con Ranuras" } },
+            { "score_nosockets",   new[] { "無插槽", "No Sockets", "ソケット無視", "无插槽", "Sin Ranuras" } },
             { "grade",          new[] { "稀有度", "Rarity", "レア度", "稀有度", "Rareza" } },
             { "level",          new[] { "等級", "Level", "レベル", "等级", "Nivel" } },
             { "by_character",   new[] { "按角色", "By character", "キャラ別", "按角色", "Por personaje" } },
